@@ -4,37 +4,100 @@ const jwt = require('jsonwebtoken');
 
 const SALT_ROUNDS = 10;
 
+const normalizeEmail = (email) => {
+  return String(email || '').trim().toLowerCase();
+};
+
 const registerUser = async ({ email, password, full_name }) => {
-  // Check if email already exists
-  const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
-  if (existing.rows.length > 0) {
-    throw new Error('Email already registered');
+  const normalizedEmail = normalizeEmail(email);
+  const normalizedFullName = String(full_name || '').trim();
+
+  if (!normalizedEmail || !password || !normalizedFullName) {
+    throw new Error('Email, password, and full name are required');
   }
 
-  // Hash password
-  const password_hash = await bcrypt.hash(password, SALT_ROUNDS);
+  if (password.length < 6) {
+    throw new Error('Password must be at least 6 characters');
+  }
 
-  // Insert user
-  const result = await pool.query(
-    `INSERT INTO users (email, password_hash, full_name)
-     VALUES ($1, $2, $3)
-     RETURNING id, email, full_name, role, created_at`,
-    [email, password_hash, full_name]
-  );
+  const client = await pool.connect();
 
-  const user = result.rows[0];
+  try {
+    await client.query('BEGIN');
 
-  // Create empty profile and loyalty record
-  await pool.query('INSERT INTO user_profiles (user_id) VALUES ($1)', [user.id]);
-  await pool.query('INSERT INTO loyalty_points (user_id) VALUES ($1)', [user.id]);
+    const existing = await client.query(
+      'SELECT id FROM users WHERE LOWER(email) = LOWER($1)',
+      [normalizedEmail]
+    );
 
-  return user;
+    if (existing.rows.length > 0) {
+      throw new Error('Email already registered');
+    }
+
+    const password_hash = await bcrypt.hash(password, SALT_ROUNDS);
+
+    const result = await client.query(
+      `INSERT INTO users (
+        email,
+        password_hash,
+        full_name
+      )
+      VALUES ($1, $2, $3)
+      RETURNING id, email, full_name, role, is_active, created_at`,
+      [
+        normalizedEmail,
+        password_hash,
+        normalizedFullName
+      ]
+    );
+
+    const user = result.rows[0];
+
+    await client.query(
+      'INSERT INTO user_profiles (user_id) VALUES ($1)',
+      [user.id]
+    );
+
+    await client.query(
+      'INSERT INTO loyalty_points (user_id) VALUES ($1)',
+      [user.id]
+    );
+
+    await client.query('COMMIT');
+
+    return user;
+  } catch (error) {
+    await client.query('ROLLBACK');
+
+    if (error.code === '23505') {
+      throw new Error('Email already registered');
+    }
+
+    throw error;
+  } finally {
+    client.release();
+  }
 };
 
 const loginUser = async ({ email, password }) => {
+  const normalizedEmail = normalizeEmail(email);
+
+  if (!normalizedEmail || !password) {
+    throw new Error('Invalid email or password');
+  }
+
   const result = await pool.query(
-    'SELECT id, email, password_hash, full_name, role FROM users WHERE email = $1 AND is_active = true',
-    [email]
+    `SELECT
+      id,
+      email,
+      password_hash,
+      full_name,
+      role,
+      is_active
+     FROM users
+     WHERE LOWER(email) = LOWER($1)
+     LIMIT 1`,
+    [normalizedEmail]
   );
 
   if (result.rows.length === 0) {
@@ -42,17 +105,38 @@ const loginUser = async ({ email, password }) => {
   }
 
   const user = result.rows[0];
-  const isMatch = await bcrypt.compare(password, user.password_hash);
+
+  if (!user.is_active) {
+    throw new Error('Account is inactive');
+  }
+
+  if (!user.password_hash) {
+    throw new Error('Invalid email or password');
+  }
+
+  const isMatch = await bcrypt.compare(
+    password,
+    user.password_hash
+  );
 
   if (!isMatch) {
     throw new Error('Invalid email or password');
   }
 
-  // Generate JWT
+  if (!process.env.JWT_SECRET) {
+    throw new Error('JWT_SECRET is not configured');
+  }
+
   const token = jwt.sign(
-    { userId: user.id, email: user.email, role: user.role },
+    {
+      userId: user.id,
+      email: user.email,
+      role: user.role
+    },
     process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+    {
+      expiresIn: process.env.JWT_EXPIRES_IN || '7d'
+    }
   );
 
   return {
@@ -66,9 +150,28 @@ const loginUser = async ({ email, password }) => {
   };
 };
 
-const changePassword = async (userId, currentPassword, newPassword) => {
+const changePassword = async (
+  userId,
+  currentPassword,
+  newPassword
+) => {
+  if (!currentPassword || !newPassword) {
+    throw new Error(
+      'current_password and new_password are required'
+    );
+  }
+
+  if (newPassword.length < 6) {
+    throw new Error(
+      'New password must be at least 6 characters'
+    );
+  }
+
   const result = await pool.query(
-    'SELECT password_hash FROM users WHERE id = $1 AND is_active = true',
+    `SELECT password_hash
+     FROM users
+     WHERE id = $1
+       AND is_active = true`,
     [userId]
   );
 
@@ -85,11 +188,20 @@ const changePassword = async (userId, currentPassword, newPassword) => {
     throw new Error('Current password is incorrect');
   }
 
-  const password_hash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+  const password_hash = await bcrypt.hash(
+    newPassword,
+    SALT_ROUNDS
+  );
 
   await pool.query(
-    'UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
-    [password_hash, userId]
+    `UPDATE users
+     SET password_hash = $1,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $2`,
+    [
+      password_hash,
+      userId
+    ]
   );
 };
 
