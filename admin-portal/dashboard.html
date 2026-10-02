@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard | NutriFit Admin</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+  <div class="admin-layout">
+
+    <aside class="sidebar">
+      <div class="logo">
+        <h2>NutriFit</h2>
+        <span>Admin Portal</span>
+      </div>
+
+      <nav>
+        <a href="dashboard.html" class="active">Dashboard</a>
+        <a href="users.html">Users</a>
+        <a href="nutrition.html">Nutrition</a>
+        <a href="meals.html">Meal Logs</a>
+        <a href="exercises.html">Exercises</a>
+        <a href="workouts-log.html">Workout Logs</a>
+        <a href="loyalty.html">Loyalty & Rewards</a>
+        <a href="analytics.html">Analytics</a>
+        <a href="gym-settings.html">Gym Settings</a>
+        <a href="minigame.html">Minigame Quizzes</a>
+        <a href="account.html">Account</a>
+        <a href="index.html" class="logout" id="logoutBtn">Logout</a>
+      </nav>
+    </aside>
+
+    <main class="main-content">
+
+      <header class="topbar">
+        <h1>Dashboard</h1>
+        <div class="admin-info" id="adminInfo">Admin</div>
+      </header>
+
+      <section class="stats-grid">
+
+        <div class="stat-card">
+          <h3>Total Users</h3>
+          <p id="statUsers">—</p>
+        </div>
+
+        <div class="stat-card">
+          <h3>Meals Logged Today</h3>
+          <p id="statMeals">—</p>
+        </div>
+
+        <div class="stat-card">
+          <h3>Workouts Completed</h3>
+          <p id="statWorkouts">—</p>
+        </div>
+
+        <div class="stat-card">
+          <h3>QR Redeemed Today</h3>
+          <p id="statQR">—</p>
+        </div>
+
+      </section>
+
+      <section class="content-card">
+        <h2>Recent Activity</h2>
+
+        <p style="font-size:14px;color:#555;">
+          Dashboard stats are loaded from the admin reporting API.
+        </p>
+      </section>
+
+    </main>
+  </div>
+
+  <script>
+    const API = 'http://localhost:5000/api';
+
+    const token = localStorage.getItem('token');
+    const user = JSON.parse(localStorage.getItem('user') || 'null');
+
+    // Auth guard
+    if (
+      !token ||
+      !user ||
+      !['admin', 'super_admin', 'gym_manager'].includes(user.role)
+    ) {
+      window.location.href = 'index.html';
+    }
+
+    // Admin info
+    document.getElementById('adminInfo').textContent =
+      (user.full_name || user.email) + ' | ' + user.role;
+
+    // Logout
+    document.getElementById('logoutBtn').addEventListener('click', (e) => {
+      e.preventDefault();
+
+      localStorage.clear();
+      window.location.href = 'index.html';
+    });
+
+    // Load dashboard stats
+    async function loadStats() {
+      try {
+        const res = await fetch(API + '/stats/dashboard', {
+          headers: {
+            'Authorization': 'Bearer ' + token
+          }
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.message || 'Failed');
+        }
+
+        document.getElementById('statUsers').textContent =
+          data.total_users ?? '—';
+
+        document.getElementById('statMeals').textContent =
+          data.meals_logged_today ?? '—';
+
+        document.getElementById('statWorkouts').textContent =
+          data.workouts_completed ?? '—';
+
+        document.getElementById('statQR').textContent =
+          data.qr_redeemed_today ?? '—';
+
+      } catch (e) {
+        document.getElementById('statUsers').textContent = '—';
+        document.getElementById('statMeals').textContent = '—';
+        document.getElementById('statWorkouts').textContent = '—';
+        document.getElementById('statQR').textContent = '—';
+      }
+    }
+
+    loadStats();
+  </script>
+</body>
+</html>

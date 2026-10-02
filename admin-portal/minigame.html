@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Minigame Quizzes | NutriFit Admin</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="admin-layout">
+    <aside class="sidebar">
+      <div class="logo">
+        <h2>NutriFit</h2>
+        <span>Admin Portal</span>
+      </div>
+      <nav>
+        <a href="dashboard.html">Dashboard</a>
+        <a href="users.html">Users</a>
+        <a href="nutrition.html">Nutrition</a>
+        <a href="meals.html">Meal Logs</a>
+        <a href="exercises.html">Exercises</a>
+        <a href="workouts-log.html">Workout Logs</a>
+        <a href="loyalty.html">Loyalty & Rewards</a>
+        <a href="analytics.html">Analytics</a>
+        <a href="gym-settings.html">Gym Settings</a>
+        <a href="minigame.html" class="active">Minigame Quizzes</a>
+        <a href="account.html">Account</a>
+        <a href="index.html" class="logout" id="logoutBtn">Logout</a>
+      </nav>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <h1>Minigame Quizzes (Stickman Form)</h1>
+        <div class="admin-info" id="adminInfo">Admin</div>
+      </header>
+
+      <section class="content-card">
+        <h2 id="formTitle">Add Quiz</h2>
+        <form id="quizForm">
+          <input type="hidden" id="quizId" />
+          <div class="form-row">
+            <input type="number" id="exercise_id" placeholder="Exercise ID (optional)" min="1" />
+            <input type="number" id="points_reward" placeholder="Points reward" value="5" min="0" />
+          </div>
+          <div class="form-row">
+            <input type="text" id="question" placeholder="Question" required style="flex:2;" />
+          </div>
+          <div class="form-row">
+            <input type="text" id="option0" placeholder="Option 0" required />
+            <input type="text" id="option1" placeholder="Option 1" required />
+          </div>
+          <div class="form-row">
+            <input type="text" id="option2" placeholder="Option 2 (optional)" />
+            <input type="text" id="option3" placeholder="Option 3 (optional)" />
+          </div>
+          <div class="form-row">
+            <input type="number" id="correct_index" placeholder="Correct index (0-3)" min="0" max="3" required />
+            <input type="text" id="explanation" placeholder="Explanation (shown after answer)" style="flex:2;" />
+            <button type="submit" class="btn btn-dark" id="submitBtn">Add Quiz</button>
+            <button type="button" class="btn" id="cancelBtn" style="display:none;">Cancel</button>
+          </div>
+        </form>
+        <p id="formMsg" style="margin-top:8px;font-size:13px;"></p>
+      </section>
+
+      <section class="content-card">
+        <h2>All Quizzes</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Exercise</th>
+              <th>Question</th>
+              <th>Correct</th>
+              <th>Points</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="quizTableBody">
+            <tr><td colspan="6">Loading...</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const API = 'http://localhost:5000/api';
+    const token = localStorage.getItem('token');
+    const user = JSON.parse(localStorage.getItem('user') || 'null');
+
+    if (!token || !user || !['admin','super_admin','gym_manager'].includes(user.role)) {
+      window.location.href = 'index.html';
+    }
+    document.getElementById('adminInfo').textContent = (user.full_name || user.email) + ' | ' + user.role;
+    document.getElementById('logoutBtn').addEventListener('click', (e) => {
+      e.preventDefault();
+      localStorage.clear();
+      window.location.href = 'index.html';
+    });
+
+    function authHeaders() {
+      return {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token
+      };
+    }
+
+    function showMsg(text, isError = false) {
+      const el = document.getElementById('formMsg');
+      el.textContent = text;
+      el.style.color = isError ? '#c62828' : '#2e7d32';
+    }
+
+    function resetForm() {
+      document.getElementById('quizForm').reset();
+      document.getElementById('quizId').value = '';
+      document.getElementById('points_reward').value = 5;
+      document.getElementById('formTitle').textContent = 'Add Quiz';
+      document.getElementById('submitBtn').textContent = 'Add Quiz';
+      document.getElementById('cancelBtn').style.display = 'none';
+      showMsg('');
+    }
+
+    function getOptionsFromForm() {
+      return [
+        document.getElementById('option0').value.trim(),
+        document.getElementById('option1').value.trim(),
+        document.getElementById('option2').value.trim(),
+        document.getElementById('option3').value.trim()
+      ].filter(Boolean);
+    }
+
+    async function loadQuizzes() {
+      const tbody = document.getElementById('quizTableBody');
+      try {
+        const res = await fetch(API + '/minigame/admin/quizzes', { headers: authHeaders() });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Failed to load');
+
+        const list = data.quizzes || [];
+        if (!list.length) {
+          tbody.innerHTML = '<tr><td colspan="6">No quizzes yet</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = list.map(q => {
+          const opts = Array.isArray(q.options) ? q.options : [];
+          const correctLabel = opts[q.correct_index] ?? q.correct_index;
+          return `
+            <tr>
+              <td>${q.id}</td>
+              <td>${q.exercise_name || q.exercise_id || '-'}</td>
+              <td>${q.question}</td>
+              <td>${correctLabel}</td>
+              <td>${q.points_reward}</td>
+              <td>
+                <button class="btn" onclick='editQuiz(${JSON.stringify(q).replace(/'/g, "&#39;")})'>Edit</button>
+                <button class="btn" onclick="deleteQuiz(${q.id})" style="margin-left:4px;color:#c62828;">Delete</button>
+              </td>
+            </tr>
+          `;
+        }).join('');
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="6" style="color:#c62828;">${err.message}</td></tr>`;
+      }
+    }
+
+    document.getElementById('quizForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('quizId').value;
+      const options = getOptionsFromForm();
+      const correct_index = Number(document.getElementById('correct_index').value);
+
+      if (options.length < 2) {
+        showMsg('Need at least 2 options', true);
+        return;
+      }
+      if (correct_index < 0 || correct_index >= options.length) {
+        showMsg('correct_index must match an option', true);
+        return;
+      }
+
+      const exerciseVal = document.getElementById('exercise_id').value.trim();
+      const payload = {
+        question: document.getElementById('question').value.trim(),
+        options,
+        correct_index,
+        explanation: document.getElementById('explanation').value.trim() || null,
+        points_reward: Number(document.getElementById('points_reward').value) || 5
+      };
+      if (exerciseVal) payload.exercise_id = Number(exerciseVal);
+
+      try {
+        const url = id ? `${API}/minigame/admin/quizzes/${id}` : `${API}/minigame/admin/quizzes`;
+        const method = id ? 'PUT' : 'POST';
+        const res = await fetch(url, {
+          method,
+          headers: authHeaders(),
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Failed');
+        showMsg(id ? 'Quiz updated' : 'Quiz created');
+        resetForm();
+        loadQuizzes();
+      } catch (err) {
+        showMsg(err.message, true);
+      }
+    });
+
+    window.editQuiz = function (q) {
+      document.getElementById('quizId').value = q.id;
+      document.getElementById('exercise_id').value = q.exercise_id || '';
+      document.getElementById('question').value = q.question || '';
+      document.getElementById('correct_index').value = q.correct_index ?? '';
+      document.getElementById('explanation').value = q.explanation || '';
+      document.getElementById('points_reward').value = q.points_reward ?? 5;
+
+      const opts = Array.isArray(q.options) ? q.options : [];
+      document.getElementById('option0').value = opts[0] || '';
+      document.getElementById('option1').value = opts[1] || '';
+      document.getElementById('option2').value = opts[2] || '';
+      document.getElementById('option3').value = opts[3] || '';
+
+      document.getElementById('formTitle').textContent = 'Edit Quiz';
+      document.getElementById('submitBtn').textContent = 'Update Quiz';
+      document.getElementById('cancelBtn').style.display = 'inline-block';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    document.getElementById('cancelBtn').addEventListener('click', resetForm);
+
+    window.deleteQuiz = async function (id) {
+      if (!confirm('Delete this quiz?')) return;
+      try {
+        const res = await fetch(`${API}/minigame/admin/quizzes/${id}`, {
+          method: 'DELETE',
+          headers: authHeaders()
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Delete failed');
+        loadQuizzes();
+      } catch (err) {
+        alert(err.message);
+      }
+    };
+
+    loadQuizzes();
+  </script>
+</body>
+</html>

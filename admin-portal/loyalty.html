@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Loyalty | NutriFit Admin</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="admin-layout">
+    <aside class="sidebar">
+      <div class="logo">
+        <h2>NutriFit</h2>
+        <span>Admin Portal</span>
+      </div>
+      <nav>
+        <a href="dashboard.html">Dashboard</a>
+        <a href="users.html">Users</a>
+        <a href="nutrition.html">Nutrition</a>
+        <a href="meals.html">Meal Logs</a>
+        <a href="exercises.html">Exercises</a>
+        <a href="workouts-log.html">Workout Logs</a>
+        <a href="loyalty.html" class="active">Loyalty & Rewards</a>
+        <a href="analytics.html">Analytics</a>
+        <a href="gym-settings.html">Gym Settings</a>
+        <a href="minigame.html">Minigame Quizzes</a>
+        <a href="account.html">Account</a>
+        <a href="index.html" class="logout" id="logoutBtn">Logout</a>
+      </nav>
+    </aside>
+    <main class="main-content">
+      <header class="topbar">
+        <h1>Loyalty & Rewards</h1>
+        <div class="admin-info" id="adminInfo">Admin</div>
+      </header>
+
+      <section class="content-card">
+        <h2>QR Code Validation</h2>
+        <p style="margin-bottom:12px;font-size:14px;color:#555;">
+          Paste the QR token from the mobile app to validate and redeem points.
+        </p>
+        <div class="form-row">
+          <input type="text" id="qrToken" placeholder="Paste QR token here" style="flex:2;" />
+          <button class="btn btn-dark" id="redeemBtn">Validate & Redeem</button>
+        </div>
+        <p id="redeemMsg" style="margin-top:10px;font-size:13px;"></p>
+      </section>
+
+      <section class="content-card">
+        <h2>Recent Transactions</h2>
+        <p style="font-size:13px;color:#666;margin-bottom:12px;">
+          Showing your own loyalty history (admin view of all users can be added later).
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>Points</th>
+              <th>Type</th>
+              <th>Description</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody id="txTableBody">
+            <tr><td colspan="4">Loading...</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const API = 'http://localhost:5000/api';
+    const token = localStorage.getItem('token');
+    const user = JSON.parse(localStorage.getItem('user') || 'null');
+
+    if (!token || !user || !['admin','super_admin','gym_manager'].includes(user.role)) {
+      window.location.href = 'index.html';
+    }
+    document.getElementById('adminInfo').textContent = (user.full_name || user.email) + ' | ' + user.role;
+
+    document.getElementById('logoutBtn').addEventListener('click', (e) => {
+      e.preventDefault();
+      localStorage.clear();
+      window.location.href = 'index.html';
+    });
+
+    function authHeaders() {
+      return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
+    }
+
+    document.getElementById('redeemBtn').addEventListener('click', async () => {
+      const qrToken = document.getElementById('qrToken').value.trim();
+      const msg = document.getElementById('redeemMsg');
+      if (!qrToken) {
+        msg.style.color = '#c62828';
+        msg.textContent = 'Paste a QR token first';
+        return;
+      }
+      try {
+        const res = await fetch(API + '/loyalty/redeem', {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ token: qrToken })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Redeem failed');
+        msg.style.color = '#2e7d32';
+        msg.textContent = data.message || 'Redeemed successfully';
+        document.getElementById('qrToken').value = '';
+        loadHistory();
+      } catch (err) {
+        msg.style.color = '#c62828';
+        msg.textContent = err.message;
+      }
+    });
+
+    async function loadHistory() {
+      const tbody = document.getElementById('txTableBody');
+      try {
+        const res = await fetch(API + '/loyalty/history', { headers: authHeaders() });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Failed');
+
+        const list = data.transactions || data.history || data || [];
+        if (!list.length) {
+          tbody.innerHTML = '<tr><td colspan="4">No transactions yet</td></tr>';
+          return;
+        }
+        tbody.innerHTML = list.map(tx => `
+          <tr>
+            <td>${tx.points}</td>
+            <td>${tx.type}</td>
+            <td>${tx.description || '-'}</td>
+            <td>${tx.created_at ? new Date(tx.created_at).toLocaleString() : '-'}</td>
+          </tr>
+        `).join('');
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="4" style="color:#c62828;">${err.message}</td></tr>`;
+      }
+    }
+
+    loadHistory();
+  </script>
+</body>
+</html>

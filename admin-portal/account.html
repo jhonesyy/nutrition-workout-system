@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Account | NutriFit Admin</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+  <div class="admin-layout">
+    <aside class="sidebar">
+      <div class="logo">
+        <h2>NutriFit</h2>
+        <span>Admin Portal</span>
+      </div>
+
+      <nav>
+        <a href="dashboard.html">Dashboard</a>
+        <a href="users.html">Users</a>
+        <a href="nutrition.html">Nutrition</a>
+        <a href="meals.html">Meal Logs</a>
+        <a href="exercises.html">Exercises</a>
+        <a href="workouts-log.html">Workout Logs</a>
+        <a href="loyalty.html">Loyalty & Rewards</a>
+        <a href="analytics.html">Analytics</a>
+        <a href="gym-settings.html">Gym Settings</a>
+        <a href="minigame.html">Minigame Quizzes</a>
+        <a href="account.html" class="active">Account</a>
+        <a href="index.html" class="logout" id="logoutBtn">Logout</a>
+      </nav>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <h1>Account Settings</h1>
+        <div class="admin-info" id="adminInfo">Admin</div>
+      </header>
+
+      <section class="content-card">
+        <h2>Logged-in Account</h2>
+
+        <p
+          id="accountDetails"
+          style="font-size:14px;line-height:1.8;"
+        ></p>
+      </section>
+
+      <section class="content-card">
+        <h2>Change Password</h2>
+
+        <form id="passwordForm">
+          <div class="form-row">
+            <input
+              type="password"
+              id="current_password"
+              placeholder="Current password"
+              required
+            />
+          </div>
+
+          <div class="form-row">
+            <input
+              type="password"
+              id="new_password"
+              placeholder="New password"
+              required
+              minlength="6"
+            />
+
+            <input
+              type="password"
+              id="confirm_password"
+              placeholder="Confirm new password"
+              required
+              minlength="6"
+            />
+
+            <button type="submit" class="btn btn-dark">
+              Update Password
+            </button>
+          </div>
+        </form>
+
+        <p
+          id="passwordMsg"
+          style="margin-top:10px;font-size:13px;"
+        ></p>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const token = localStorage.getItem('token');
+    const user = JSON.parse(localStorage.getItem('user') || 'null');
+
+    // Auth guard
+    if (
+      !token ||
+      !user ||
+      !['admin', 'super_admin', 'gym_manager'].includes(user.role)
+    ) {
+      window.location.href = 'index.html';
+    }
+
+    // Admin info
+    document.getElementById('adminInfo').textContent =
+      (user.full_name || user.email) + ' | ' + user.role;
+
+    // Account details
+    document.getElementById('accountDetails').innerHTML = `
+      <strong>Name:</strong> ${user.full_name || '-'}<br>
+      <strong>Email:</strong> ${user.email}<br>
+      <strong>Role:</strong> ${user.role}<br>
+      <strong>ID:</strong> ${user.id}
+    `;
+
+    // Logout
+    document.getElementById('logoutBtn').addEventListener('click', (e) => {
+      e.preventDefault();
+
+      localStorage.clear();
+      window.location.href = 'index.html';
+    });
+
+    // Change password
+    document.getElementById('passwordForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const msg = document.getElementById('passwordMsg');
+
+      const current_password =
+        document.getElementById('current_password').value;
+
+      const new_password =
+        document.getElementById('new_password').value;
+
+      const confirm_password =
+        document.getElementById('confirm_password').value;
+
+      // Confirm passwords match
+      if (new_password !== confirm_password) {
+        msg.style.color = '#c62828';
+        msg.textContent = 'New passwords do not match';
+        return;
+      }
+
+      // Minimum password length
+      if (new_password.length < 6) {
+        msg.style.color = '#c62828';
+        msg.textContent = 'New password must be at least 6 characters';
+        return;
+      }
+
+      try {
+        const res = await fetch(
+          'http://localhost:5000/api/auth/change-password',
+          {
+            method: 'POST',
+
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + token
+            },
+
+            body: JSON.stringify({
+              current_password,
+              new_password
+            })
+          }
+        );
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.message || 'Failed');
+        }
+
+        msg.style.color = '#2e7d32';
+        msg.textContent = 'Password changed successfully';
+
+        e.target.reset();
+      } catch (err) {
+        msg.style.color = '#c62828';
+        msg.textContent = err.message;
+      }
+    });
+  </script>
+</body>
+</html>

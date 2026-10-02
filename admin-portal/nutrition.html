@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nutrition | NutriFit Admin</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="admin-layout">
+    <aside class="sidebar">
+      <div class="logo">
+        <h2>NutriFit</h2>
+        <span>Admin Portal</span>
+      </div>
+      <nav>
+        <a href="dashboard.html">Dashboard</a>
+        <a href="users.html">Users</a>
+        <a href="nutrition.html" class="active">Nutrition</a>
+        <a href="meals.html">Meal Logs</a>
+        <a href="exercises.html">Exercises</a>
+        <a href="workouts-log.html">Workout Logs</a>
+        <a href="loyalty.html">Loyalty & Rewards</a>
+        <a href="analytics.html">Analytics</a>
+        <a href="gym-settings.html">Gym Settings</a>
+        <a href="minigame.html">Minigame Quizzes</a>
+        <a href="account.html">Account</a>
+        <a href="index.html" class="logout" id="logoutBtn">Logout</a>
+      </nav>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <h1>Nutrition Management</h1>
+        <div class="admin-info" id="adminInfo">Admin | House of Strength GYM</div>
+      </header>
+
+      <!-- Add / Edit Form -->
+      <section class="content-card">
+        <h2 id="formTitle">Add New Food</h2>
+        <form id="foodForm">
+          <input type="hidden" id="foodId" />
+          <div class="form-row">
+            <input type="text" id="name" placeholder="Food name" required />
+            <input type="text" id="brand" placeholder="Brand" />
+            <input type="text" id="serving_size" placeholder="Serving size (e.g. 100g)" />
+          </div>
+          <div class="form-row">
+            <input type="number" id="calories" placeholder="Calories" step="0.1" min="0" required />
+            <input type="number" id="protein_g" placeholder="Protein (g)" step="0.1" min="0" required />
+            <input type="number" id="carbs_g" placeholder="Carbs (g)" step="0.1" min="0" required />
+            <input type="number" id="fat_g" placeholder="Fat (g)" step="0.1" min="0" required />
+          </div>
+          <div class="form-row">
+            <input type="number" id="fiber_g" placeholder="Fiber (g)" step="0.1" min="0" />
+            <input type="text" id="allergen_tags" placeholder="Allergen tags (comma separated)" />
+            <button type="submit" class="btn btn-dark" id="submitBtn">Add Food</button>
+            <button type="button" class="btn" id="cancelEditBtn" style="display:none;">Cancel</button>
+          </div>
+        </form>
+        <p id="formMsg" style="margin-top:10px;font-size:13px;"></p>
+      </section>
+
+      <!-- Food List -->
+      <section class="content-card">
+        <h2>Food List</h2>
+        <div class="form-row" style="margin-bottom:12px;">
+          <input type="text" id="searchInput" placeholder="Search foods..." style="max-width:280px;" />
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Name</th>
+              <th>Brand</th>
+              <th>Calories</th>
+              <th>Protein</th>
+              <th>Carbs</th>
+              <th>Fat</th>
+              <th>Allergens</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="foodTableBody">
+            <tr><td colspan="9">Loading...</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const API = 'http://localhost:5000/api';
+    const token = localStorage.getItem('token');
+    const user = JSON.parse(localStorage.getItem('user') || 'null');
+
+    // ---- Auth guard ----
+    if (!token || !user || (user.role !== 'admin' && user.role !== 'gym_manager' && user.role !== 'super_admin')) {
+      window.location.href = 'index.html';
+    }
+
+    document.getElementById('adminInfo').textContent =
+      (user.full_name || user.email) + ' | ' + user.role;
+
+    // ---- Logout ----
+    document.getElementById('logoutBtn').addEventListener('click', (e) => {
+      e.preventDefault();
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.href = 'index.html';
+    });
+
+    // ---- Helpers ----
+    function authHeaders() {
+      return {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token
+      };
+    }
+
+    function showMsg(text, isError = false) {
+      const el = document.getElementById('formMsg');
+      el.textContent = text;
+      el.style.color = isError ? '#c62828' : '#2e7d32';
+    }
+
+    function resetForm() {
+      document.getElementById('foodForm').reset();
+      document.getElementById('foodId').value = '';
+      document.getElementById('formTitle').textContent = 'Add New Food';
+      document.getElementById('submitBtn').textContent = 'Add Food';
+      document.getElementById('cancelEditBtn').style.display = 'none';
+      showMsg('');
+    }
+
+    // ---- Load foods ----
+    async function loadFoods(search = '') {
+      const tbody = document.getElementById('foodTableBody');
+      tbody.innerHTML = '<tr><td colspan="9">Loading...</td></tr>';
+
+      try {
+        const url = search
+          ? `${API}/foods?search=${encodeURIComponent(search)}`
+          : `${API}/foods`;
+
+        const res = await fetch(url, { headers: authHeaders() });
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.message || 'Failed to load foods');
+
+        const foods = Array.isArray(data) ? data : (data.foods || data);
+
+        if (!foods.length) {
+          tbody.innerHTML = '<tr><td colspan="9">No foods found</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = foods.map(f => `
+          <tr>
+            <td>${f.id}</td>
+            <td>${f.name || ''}</td>
+            <td>${f.brand || '-'}</td>
+            <td>${f.calories ?? '-'}</td>
+            <td>${f.protein_g ?? '-'}g</td>
+            <td>${f.carbs_g ?? '-'}g</td>
+            <td>${f.fat_g ?? '-'}g</td>
+            <td>${(f.allergen_tags || []).join(', ') || 'None'}</td>
+            <td>
+              <button class="btn" onclick='editFood(${JSON.stringify(f)})'>Edit</button>
+              <button class="btn" onclick="deleteFood(${f.id})" style="margin-left:4px;color:#c62828;">Delete</button>
+            </td>
+          </tr>
+        `).join('');
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="9" style="color:#c62828;">${err.message}</td></tr>`;
+      }
+    }
+
+    // ---- Add / Update ----
+    document.getElementById('foodForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      showMsg('');
+
+      const id = document.getElementById('foodId').value;
+      const payload = {
+        name: document.getElementById('name').value.trim(),
+        brand: document.getElementById('brand').value.trim() || null,
+        serving_size: document.getElementById('serving_size').value.trim() || null,
+        calories: Number(document.getElementById('calories').value),
+        protein_g: Number(document.getElementById('protein_g').value),
+        carbs_g: Number(document.getElementById('carbs_g').value),
+        fat_g: Number(document.getElementById('fat_g').value),
+        fiber_g: Number(document.getElementById('fiber_g').value) || 0,
+        allergen_tags: document.getElementById('allergen_tags').value
+          .split(',')
+          .map(s => s.trim())
+          .filter(Boolean)
+      };
+
+      try {
+        const url = id ? `${API}/foods/${id}` : `${API}/foods`;
+        const method = id ? 'PUT' : 'POST';
+
+        const res = await fetch(url, {
+          method,
+          headers: authHeaders(),
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Request failed');
+
+        showMsg(id ? 'Food updated successfully' : 'Food added successfully');
+        resetForm();
+        loadFoods();
+      } catch (err) {
+        showMsg(err.message, true);
+      }
+    });
+
+    // ---- Edit ----
+    window.editFood = function (food) {
+      document.getElementById('foodId').value = food.id;
+      document.getElementById('name').value = food.name || '';
+      document.getElementById('brand').value = food.brand || '';
+      document.getElementById('serving_size').value = food.serving_size || '';
+      document.getElementById('calories').value = food.calories ?? '';
+      document.getElementById('protein_g').value = food.protein_g ?? '';
+      document.getElementById('carbs_g').value = food.carbs_g ?? '';
+      document.getElementById('fat_g').value = food.fat_g ?? '';
+      document.getElementById('fiber_g').value = food.fiber_g ?? '';
+      document.getElementById('allergen_tags').value = (food.allergen_tags || []).join(', ');
+
+      document.getElementById('formTitle').textContent = 'Edit Food';
+      document.getElementById('submitBtn').textContent = 'Update Food';
+      document.getElementById('cancelEditBtn').style.display = 'inline-block';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    document.getElementById('cancelEditBtn').addEventListener('click', resetForm);
+
+    // ---- Delete ----
+    window.deleteFood = async function (id) {
+      if (!confirm('Delete this food?')) return;
+
+      try {
+        const res = await fetch(`${API}/foods/${id}`, {
+          method: 'DELETE',
+          headers: authHeaders()
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Delete failed');
+        loadFoods();
+      } catch (err) {
+        alert(err.message);
+      }
+    };
+
+    // ---- Search ----
+    let searchTimeout;
+    document.getElementById('searchInput').addEventListener('input', (e) => {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => loadFoods(e.target.value.trim()), 300);
+    });
+
+    // ---- Init ----
+    loadFoods();
+  </script>
+</body>
+</html>

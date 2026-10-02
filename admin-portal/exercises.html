@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Exercises | NutriFit Admin</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="admin-layout">
+    <aside class="sidebar">
+      <div class="logo">
+        <h2>NutriFit</h2>
+        <span>Admin Portal</span>
+      </div>
+      <nav>
+        <a href="dashboard.html">Dashboard</a>
+        <a href="users.html">Users</a>
+        <a href="nutrition.html">Nutrition</a>
+        <a href="meals.html">Meal Logs</a>
+        <a href="exercises.html" class="active">Exercises</a>
+        <a href="workouts-log.html">Workout Logs</a>
+        <a href="loyalty.html">Loyalty & Rewards</a>
+        <a href="analytics.html">Analytics</a>
+        <a href="gym-settings.html">Gym Settings</a>
+        <a href="minigame.html">Minigame Quizzes</a>
+        <a href="account.html">Account</a>
+        <a href="index.html" class="logout" id="logoutBtn">Logout</a>
+      </nav>
+    </aside>
+    <main class="main-content">
+      <header class="topbar">
+        <h1>Exercise Management</h1>
+        <div class="admin-info" id="adminInfo">Admin</div>
+      </header>
+
+      <section class="content-card">
+        <h2 id="formTitle">Add Exercise</h2>
+        <form id="exerciseForm">
+          <input type="hidden" id="exerciseId" />
+          <div class="form-row">
+            <input type="text" id="name" placeholder="Exercise name" required />
+            <input type="text" id="muscle_group" placeholder="Muscle group" />
+            <input type="text" id="equipment" placeholder="Equipment" />
+          </div>
+          <div class="form-row">
+            <select id="difficulty">
+              <option value="">Difficulty</option>
+              <option value="Beginner">Beginner</option>
+              <option value="Intermediate">Intermediate</option>
+              <option value="Advanced">Advanced</option>
+            </select>
+            <input type="number" id="default_sets" placeholder="Default sets" min="1" />
+            <input type="text" id="default_reps" placeholder="Default reps (e.g. 8-12)" />
+            <button type="submit" class="btn btn-dark" id="submitBtn">Add Exercise</button>
+            <button type="button" class="btn" id="cancelEditBtn" style="display:none;">Cancel</button>
+          </div>
+        </form>
+        <p id="formMsg" style="margin-top:8px;font-size:13px;"></p>
+      </section>
+
+      <section class="content-card">
+        <h2>Exercise List</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Name</th>
+              <th>Muscle Group</th>
+              <th>Equipment</th>
+              <th>Difficulty</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="exerciseTableBody">
+            <tr><td colspan="6">Loading...</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const API = 'http://localhost:5000/api';
+    const token = localStorage.getItem('token');
+    const user = JSON.parse(localStorage.getItem('user') || 'null');
+
+    if (!token || !user || !['admin','super_admin','gym_manager'].includes(user.role)) {
+      window.location.href = 'index.html';
+    }
+    document.getElementById('adminInfo').textContent = (user.full_name || user.email) + ' | ' + user.role;
+
+    document.getElementById('logoutBtn').addEventListener('click', (e) => {
+      e.preventDefault();
+      localStorage.clear();
+      window.location.href = 'index.html';
+    });
+
+    function authHeaders() {
+      return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
+    }
+
+    function showMsg(text, isError = false) {
+      const el = document.getElementById('formMsg');
+      el.textContent = text;
+      el.style.color = isError ? '#c62828' : '#2e7d32';
+    }
+
+    function resetForm() {
+      document.getElementById('exerciseForm').reset();
+      document.getElementById('exerciseId').value = '';
+      document.getElementById('formTitle').textContent = 'Add Exercise';
+      document.getElementById('submitBtn').textContent = 'Add Exercise';
+      document.getElementById('cancelEditBtn').style.display = 'none';
+      showMsg('');
+    }
+
+    async function loadExercises() {
+      const tbody = document.getElementById('exerciseTableBody');
+      try {
+        const res = await fetch(API + '/workouts/exercises', { headers: authHeaders() });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Failed to load');
+
+        const list = Array.isArray(data) ? data : (data.exercises || data);
+        if (!list.length) {
+          tbody.innerHTML = '<tr><td colspan="6">No exercises found</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = list.map(ex => `
+          <tr>
+            <td>${ex.id}</td>
+            <td>${ex.name || ''}</td>
+            <td>${ex.muscle_group || '-'}</td>
+            <td>${ex.equipment || '-'}</td>
+            <td>${ex.difficulty || '-'}</td>
+            <td>
+              <button class="btn" onclick='editExercise(${JSON.stringify(ex)})'>Edit</button>
+              <button class="btn" onclick="deleteExercise(${ex.id})" style="margin-left:4px;color:#c62828;">Delete</button>
+            </td>
+          </tr>
+        `).join('');
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="6" style="color:#c62828;">${err.message}</td></tr>`;
+      }
+    }
+
+    document.getElementById('exerciseForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('exerciseId').value;
+      const payload = {
+        name: document.getElementById('name').value.trim(),
+        muscle_group: document.getElementById('muscle_group').value.trim() || null,
+        equipment: document.getElementById('equipment').value.trim() || null,
+        difficulty: document.getElementById('difficulty').value || null,
+        default_sets: Number(document.getElementById('default_sets').value) || null,
+        default_reps: document.getElementById('default_reps').value.trim() || null
+      };
+
+      try {
+        const url = id ? `${API}/workouts/exercises/${id}` : `${API}/workouts/exercises`;
+        const method = id ? 'PUT' : 'POST';
+        const res = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(payload) });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Failed');
+        showMsg(id ? 'Exercise updated' : 'Exercise added');
+        resetForm();
+        loadExercises();
+      } catch (err) {
+        showMsg(err.message, true);
+      }
+    });
+
+    window.editExercise = function(ex) {
+      document.getElementById('exerciseId').value = ex.id;
+      document.getElementById('name').value = ex.name || '';
+      document.getElementById('muscle_group').value = ex.muscle_group || '';
+      document.getElementById('equipment').value = ex.equipment || '';
+      document.getElementById('difficulty').value = ex.difficulty || '';
+      document.getElementById('default_sets').value = ex.default_sets || '';
+      document.getElementById('default_reps').value = ex.default_reps || '';
+      document.getElementById('formTitle').textContent = 'Edit Exercise';
+      document.getElementById('submitBtn').textContent = 'Update Exercise';
+      document.getElementById('cancelEditBtn').style.display = 'inline-block';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    document.getElementById('cancelEditBtn').addEventListener('click', resetForm);
+
+    window.deleteExercise = async function(id) {
+      if (!confirm('Delete this exercise?')) return;
+      try {
+        const res = await fetch(`${API}/workouts/exercises/${id}`, {
+          method: 'DELETE',
+          headers: authHeaders()
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Delete failed');
+        loadExercises();
+      } catch (err) {
+        alert(err.message);
+      }
+    };
+
+    loadExercises();
+  </script>
+</body>
+</html>

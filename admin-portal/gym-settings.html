@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gym Settings | NutriFit Admin</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="admin-layout">
+    <aside class="sidebar">
+      <div class="logo">
+        <h2>NutriFit</h2>
+        <span>Admin Portal</span>
+      </div>
+      <nav>
+        <a href="dashboard.html">Dashboard</a>
+        <a href="users.html">Users</a>
+        <a href="nutrition.html">Nutrition</a>
+        <a href="meals.html">Meal Logs</a>
+        <a href="exercises.html">Exercises</a>
+        <a href="workouts-log.html">Workout Logs</a>
+        <a href="loyalty.html">Loyalty & Rewards</a>
+        <a href="analytics.html">Analytics</a>
+        <a href="gym-settings.html" class="active">Gym Settings</a>
+        <a href="minigame.html">Minigame Quizzes</a>
+        <a href="account.html">Account</a>
+        <a href="index.html" class="logout" id="logoutBtn">Logout</a>
+      </nav>
+    </aside>
+    <main class="main-content">
+      <header class="topbar">
+        <h1>Partner Gym Settings</h1>
+        <div class="admin-info" id="adminInfo">Admin</div>
+      </header>
+
+      <!-- Gym Profile -->
+      <section class="content-card">
+        <h2>Gym Profile</h2>
+        <form id="settingsForm">
+          <div class="form-row">
+            <input type="text" id="gym_name" placeholder="Gym name" required />
+            <input type="text" id="gym_address" placeholder="Address" />
+          </div>
+          <div class="form-row">
+            <input type="text" id="gym_contact" placeholder="Contact number" />
+            <input type="text" id="gym_hours" placeholder="Operating hours" />
+            <button type="submit" class="btn btn-dark">Save Profile</button>
+          </div>
+        </form>
+        <p id="settingsMsg" style="margin-top:8px;font-size:13px;"></p>
+      </section>
+
+      <!-- Rewards -->
+      <section class="content-card">
+        <h2 id="rewardFormTitle">Add Redeemable Reward</h2>
+        <form id="rewardForm">
+          <input type="hidden" id="reward_id" />
+          <div class="form-row">
+            <input type="text" id="reward_name" placeholder="Reward name (e.g. 1-Day Gym Pass)" required />
+            <input type="number" id="reward_points" placeholder="Points required" min="1" required />
+            <input type="text" id="reward_desc" placeholder="Description (optional)" />
+            <button type="submit" class="btn btn-dark" id="rewardSubmitBtn">Add Reward</button>
+            <button type="button" class="btn" id="rewardCancelBtn" style="display:none;">Cancel</button>
+          </div>
+        </form>
+        <p id="rewardMsg" style="margin-top:8px;font-size:13px;"></p>
+
+        <table style="margin-top:16px;">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Name</th>
+              <th>Points</th>
+              <th>Description</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="rewardsBody">
+            <tr><td colspan="6">Loading...</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const API = 'http://localhost:5000/api';
+    const token = localStorage.getItem('token');
+    const user = JSON.parse(localStorage.getItem('user') || 'null');
+
+    if (!token || !user || !['admin','super_admin','gym_manager'].includes(user.role)) {
+      window.location.href = 'index.html';
+    }
+    document.getElementById('adminInfo').textContent = (user.full_name || user.email) + ' | ' + user.role;
+    document.getElementById('logoutBtn').addEventListener('click', (e) => {
+      e.preventDefault();
+      localStorage.clear();
+      window.location.href = 'index.html';
+    });
+
+    function authHeaders() {
+      return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
+    }
+
+    // ---- Gym Settings ----
+    async function loadSettings() {
+      try {
+        const res = await fetch(API + '/gym/settings');
+        const data = await res.json();
+        if (data) {
+          document.getElementById('gym_name').value = data.name || '';
+          document.getElementById('gym_address').value = data.address || '';
+          document.getElementById('gym_contact').value = data.contact_number || '';
+          document.getElementById('gym_hours').value = data.operating_hours || '';
+        }
+      } catch (e) {}
+    }
+
+    document.getElementById('settingsForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById('settingsMsg');
+      try {
+        const res = await fetch(API + '/gym/settings', {
+          method: 'PUT',
+          headers: authHeaders(),
+          body: JSON.stringify({
+            name: document.getElementById('gym_name').value.trim(),
+            address: document.getElementById('gym_address').value.trim(),
+            contact_number: document.getElementById('gym_contact').value.trim(),
+            operating_hours: document.getElementById('gym_hours').value.trim()
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Failed');
+        msg.style.color = '#2e7d32';
+        msg.textContent = 'Settings saved';
+      } catch (err) {
+        msg.style.color = '#c62828';
+        msg.textContent = err.message;
+      }
+    });
+
+    // ---- Rewards ----
+    function resetRewardForm() {
+      document.getElementById('rewardForm').reset();
+      document.getElementById('reward_id').value = '';
+      document.getElementById('rewardFormTitle').textContent = 'Add Redeemable Reward';
+      document.getElementById('rewardSubmitBtn').textContent = 'Add Reward';
+      document.getElementById('rewardCancelBtn').style.display = 'none';
+      document.getElementById('rewardMsg').textContent = '';
+    }
+
+    async function loadRewards() {
+      const tbody = document.getElementById('rewardsBody');
+      try {
+        const res = await fetch(API + '/gym/rewards', { headers: authHeaders() });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Failed');
+        const list = data.rewards || data;
+        if (!list.length) {
+          tbody.innerHTML = '<tr><td colspan="6">No rewards yet</td></tr>';
+          return;
+        }
+        tbody.innerHTML = list.map(r => `
+          <tr>
+            <td>${r.id}</td>
+            <td>${r.name}</td>
+            <td>${r.points_required}</td>
+            <td>${r.description || '-'}</td>
+            <td>
+              <span class="badge ${r.is_active ? 'success' : ''}">
+                ${r.is_active ? 'Active' : 'Inactive'}
+              </span>
+            </td>
+            <td>
+              <button class="btn" onclick='editReward(${JSON.stringify(r)})'>Edit</button>
+              ${r.is_active
+                ? `<button class="btn" onclick="setRewardActive(${r.id}, false)" style="margin-left:4px;color:#c62828;">Deactivate</button>`
+                : `<button class="btn" onclick="setRewardActive(${r.id}, true)" style="margin-left:4px;color:#2e7d32;">Activate</button>`
+              }
+            </td>
+          </tr>
+        `).join('');
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="6" style="color:#c62828;">${err.message}</td></tr>`;
+      }
+    }
+
+    // Add or Update
+    document.getElementById('rewardForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById('rewardMsg');
+      const id = document.getElementById('reward_id').value;
+
+      const payload = {
+        name: document.getElementById('reward_name').value.trim(),
+        points_required: Number(document.getElementById('reward_points').value),
+        description: document.getElementById('reward_desc').value.trim() || null
+      };
+
+      try {
+        const url = id ? `${API}/gym/rewards/${id}` : `${API}/gym/rewards`;
+        const method = id ? 'PUT' : 'POST';
+
+        const res = await fetch(url, {
+          method,
+          headers: authHeaders(),
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Failed');
+
+        msg.style.color = '#2e7d32';
+        msg.textContent = id ? 'Reward updated' : 'Reward added';
+        resetRewardForm();
+        loadRewards();
+      } catch (err) {
+        msg.style.color = '#c62828';
+        msg.textContent = err.message;
+      }
+    });
+
+    // Edit → fill form
+    window.editReward = function (r) {
+      document.getElementById('reward_id').value = r.id;
+      document.getElementById('reward_name').value = r.name || '';
+      document.getElementById('reward_points').value = r.points_required || '';
+      document.getElementById('reward_desc').value = r.description || '';
+      document.getElementById('rewardFormTitle').textContent = 'Edit Reward';
+      document.getElementById('rewardSubmitBtn').textContent = 'Update Reward';
+      document.getElementById('rewardCancelBtn').style.display = 'inline-block';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    document.getElementById('rewardCancelBtn').addEventListener('click', resetRewardForm);
+
+    // Activate / Deactivate
+    window.setRewardActive = async function (id, is_active) {
+      const action = is_active ? 'activate' : 'deactivate';
+      if (!confirm(`Are you sure you want to ${action} this reward?`)) return;
+
+      try {
+        const res = await fetch(`${API}/gym/rewards/${id}`, {
+          method: 'PUT',
+          headers: authHeaders(),
+          body: JSON.stringify({ is_active })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Failed');
+        loadRewards();
+      } catch (err) {
+        alert(err.message);
+      }
+    };
+
+    loadSettings();
+    loadRewards();
+  </script>
+</body>
+</html>
