@@ -1,5 +1,6 @@
 const loyaltyService = require('./loyalty.service');
 
+// -------------------- User --------------------
 const getMyPoints = async (req, res) => {
   try {
     const points = await loyaltyService.getPoints(req.user.userId);
@@ -17,31 +18,6 @@ const getMyHistory = async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });
-  }
-};
-
-const generateQR = async (req, res) => {
-  try {
-    const points = parseInt(req.body.points) || 50;
-    const result = await loyaltyService.generateQRPayload(req.user.userId, points);
-    res.json(result);
-  } catch (error) {
-    console.error(error);
-    res.status(400).json({ message: error.message });
-  }
-};
-
-const redeemQR = async (req, res) => {
-  try {
-    const { qr_token } = req.body;
-    if (!qr_token) {
-      return res.status(400).json({ message: 'qr_token is required' });
-    }
-    const result = await loyaltyService.redeemQR(qr_token);
-    res.json(result);
-  } catch (error) {
-    console.error(error);
-    res.status(400).json({ message: error.message });
   }
 };
 
@@ -63,6 +39,65 @@ const earnPoints = async (req, res) => {
   }
 };
 
+// Optional old flow: user generates personal QR
+const generateQR = async (req, res) => {
+  try {
+    const points = parseInt(req.body.points, 10) || 50;
+    const result = await loyaltyService.generateQRPayload(req.user.userId, points);
+    res.json(result);
+  } catch (error) {
+    console.error(error);
+    res.status(400).json({ message: error.message });
+  }
+};
+
+// Optional old flow: staff redeems user QR
+const redeemQR = async (req, res) => {
+  try {
+    const qrToken = req.body.qr_token || req.body.token;
+    if (!qrToken) {
+      return res.status(400).json({ message: 'qr_token is required' });
+    }
+    const result = await loyaltyService.redeemQR(qrToken);
+    res.json(result);
+  } catch (error) {
+    console.error(error);
+    res.status(400).json({ message: error.message });
+  }
+};
+
+// -------------------- NEW flow --------------------
+// Admin generates QR for a posted reward
+const generateRewardQr = async (req, res) => {
+  try {
+    const rewardId = parseInt(req.body.reward_id, 10);
+    if (!rewardId) {
+      return res.status(400).json({ message: 'reward_id is required' });
+    }
+    const result = await loyaltyService.generateRewardQR(rewardId);
+    res.json(result);
+  } catch (error) {
+    console.error(error);
+    res.status(400).json({ message: error.message });
+  }
+};
+
+// User scans admin QR in NutriFit app
+const scanReward = async (req, res) => {
+  try {
+    const qrToken = req.body.qr_token || req.body.token;
+    if (!qrToken) {
+      return res.status(400).json({ message: 'qr_token is required' });
+    }
+    const result = await loyaltyService.scanRewardQR(req.user.userId, qrToken);
+    res.json(result);
+  } catch (error) {
+    console.error(error);
+    res.status(400).json({ message: error.message });
+  }
+};
+
+// -------------------- Admin lists --------------------
 const getAllHistory = async (req, res) => {
   try {
     const limit = Number(req.query.limit) || 50;
@@ -88,9 +123,11 @@ const getRedemptions = async (req, res) => {
 module.exports = {
   getMyPoints,
   getMyHistory,
+  earnPoints,
   generateQR,
   redeemQR,
-  earnPoints,
+  generateRewardQr,
+  scanReward,
   getAllHistory,
   getRedemptions
 };

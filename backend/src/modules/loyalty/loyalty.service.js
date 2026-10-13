@@ -2,11 +2,14 @@ const pool = require('../../config/db');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
-// Get current points balance
+// --------------------------------------------------
+// Points balance
+// --------------------------------------------------
 const getPoints = async (userId) => {
   const result = await pool.query(
-    `SELECT total_points, lifetime_points, updated_at 
-     FROM loyalty_points WHERE user_id = $1`,
+    `SELECT total_points, lifetime_points, updated_at
+     FROM loyalty_points
+     WHERE user_id = $1`,
     [userId]
   );
 
@@ -21,14 +24,16 @@ const getPoints = async (userId) => {
   return result.rows[0];
 };
 
-// Add points (earn)
+// --------------------------------------------------
+// Earn points
+// --------------------------------------------------
 const addPoints = async (userId, points, description, referenceId = null) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
     await client.query(
-      `UPDATE loyalty_points 
+      `UPDATE loyalty_points
        SET total_points = total_points + $1,
            lifetime_points = lifetime_points + $1,
            updated_at = CURRENT_TIMESTAMP
@@ -38,7 +43,7 @@ const addPoints = async (userId, points, description, referenceId = null) => {
 
     await client.query(
       `INSERT INTO loyalty_transactions
-       (user_id, points, type, description, reference_id)
+         (user_id, points, type, description, reference_id)
        VALUES ($1, $2, 'earn', $3, $4)`,
       [userId, points, description, referenceId]
     );
@@ -53,7 +58,9 @@ const addPoints = async (userId, points, description, referenceId = null) => {
   }
 };
 
-// Generate QR
+// --------------------------------------------------
+// OLD flow (optional keep): user generates personal QR
+// --------------------------------------------------
 const generateQRPayload = async (userId, rewardPoints = 50) => {
   const balance = await getPoints(userId);
 
@@ -67,24 +74,24 @@ const generateQRPayload = async (userId, rewardPoints = 50) => {
   const expiresAt = Math.floor(Date.now() / 1000) + 15 * 60;
 
   const payload = {
+    type: 'loyalty_redeem',
     userId,
     points: rewardPoints,
     nonce,
-    exp: expiresAt,
-    type: 'loyalty_redeem'
+    exp: expiresAt
   };
 
   const token = jwt.sign(payload, process.env.JWT_SECRET);
 
   await pool.query(
     `INSERT INTO loyalty_transactions
-     (user_id, points, type, description, reference_id)
+       (user_id, points, type, description, reference_id)
      VALUES ($1, $2, 'redeem', 'QR generated - pending scan', $3)`,
     [userId, -rewardPoints, nonce]
   );
 
   await pool.query(
-    `UPDATE loyalty_points 
+    `UPDATE loyalty_points
      SET total_points = total_points - $1,
          updated_at = CURRENT_TIMESTAMP
      WHERE user_id = $2`,
@@ -99,7 +106,7 @@ const generateQRPayload = async (userId, rewardPoints = 50) => {
   };
 };
 
-// Redeem QR
+// Staff validates old-style user QR
 const redeemQR = async (qrToken) => {
   let decoded;
   try {
@@ -113,8 +120,9 @@ const redeemQR = async (qrToken) => {
   }
 
   const existing = await pool.query(
-    `SELECT id FROM loyalty_transactions 
-     WHERE reference_id = $1 AND description LIKE '%redeemed%'`,
+    `SELECT id FROM loyalty_transactions
+     WHERE reference_id = $1
+       AND description ILIKE '%redeemed%'`,
     [decoded.nonce]
   );
 
@@ -123,7 +131,7 @@ const redeemQR = async (qrToken) => {
   }
 
   await pool.query(
-    `UPDATE loyalty_transactions 
+    `UPDATE loyalty_transactions
      SET description = 'QR redeemed successfully'
      WHERE reference_id = $1`,
     [decoded.nonce]
@@ -137,20 +145,153 @@ const redeemQR = async (qrToken) => {
   };
 };
 
-// User history
+// --------------------------------------------------
+// NEW flow: Admin generates QR for a posted reward
+// --------------------------------------------------
+const generateRewardQR = async (rewardId) => {
+  const result = await pool.query(
+    `SELECT id, name, points_required, description, is_active
+     FROM rewards
+     WHERE id = $1`,
+    [rewardId]
+  );
+
+  const reward = result.rows[0];
+  if (!reward) {
+    throw new Error('Reward not found');
+  }
+  if (!reward.is_active) {
+    throw new Error('Reward is inactive');
+  }
+
+  const nonce = crypto.randomBytes(16).toString('hex');
+  const expiresAt = Math.floor(Date.now() / 1000) + 30 * 60; // 30 min
+
+  const payload = {
+    type: 'reward_claim',
+    reward_id: reward.id,
+    reward_name: reward.name,
+    points_required: reward.points_required,
+    nonce,
+    exp: expiresAt
+  };
+
+  const qr_token = jwt.sign(payload, process.env.JWT_SECRET);
+
+  return {
+    qr_token,
+    reward_id: reward.id,
+    reward_name: reward.name,
+    points_required: reward.points_required,
+    expires_in_seconds: 30 * 60,
+    message: 'QR ready. Members scan this with NutriFit to claim the reward.'
+  };
+};
+
+// --------------------------------------------------
+// NEW flow: User scans admin QR in NutriFit app
+// --------------------------------------------------
+const scanRewardQR = async (userId, qrToken) => {
+  let decoded;
+  try {
+    decoded = jwt.verify(qrToken, process.env.JWT_SECRET);
+  } catch (err) {
+    throw new Error('Invalid or expired QR code');
+  }
+
+  if (decoded.type !== 'reward_claim') {
+    throw new Error('Invalid QR type');
+  }
+
+  // One-time use
+  const used = await pool.query(
+    `SELECT id FROM loyalty_transactions
+     WHERE reference_id = $1
+       AND description ILIKE '%claimed%'`,
+    [decoded.nonce]
+  );
+  if (used.rows.length > 0) {
+    throw new Error('This QR code has already been used');
+  }
+
+  // Confirm reward still active
+  const rewardCheck = await pool.query(
+    `SELECT id, name, points_required, is_active
+     FROM rewards
+     WHERE id = $1`,
+    [decoded.reward_id]
+  );
+  const reward = rewardCheck.rows[0];
+  if (!reward || !reward.is_active) {
+    throw new Error('This reward is no longer available');
+  }
+
+  const pointsNeeded = reward.points_required;
+  const balance = await getPoints(userId);
+
+  if (balance.total_points < pointsNeeded) {
+    throw new Error(
+      `Not enough points. You have ${balance.total_points}, need ${pointsNeeded}`
+    );
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    await client.query(
+      `UPDATE loyalty_points
+       SET total_points = total_points - $1,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE user_id = $2`,
+      [pointsNeeded, userId]
+    );
+
+    await client.query(
+      `INSERT INTO loyalty_transactions
+         (user_id, points, type, description, reference_id)
+       VALUES ($1, $2, 'redeem', $3, $4)`,
+      [
+        userId,
+        -pointsNeeded,
+        `Reward claimed: ${reward.name}`,
+        decoded.nonce
+      ]
+    );
+
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  return {
+    success: true,
+    reward_id: reward.id,
+    reward_name: reward.name,
+    points_spent: pointsNeeded,
+    remaining_points: balance.total_points - pointsNeeded,
+    message: `Successfully claimed: ${reward.name}`
+  };
+};
+
+// --------------------------------------------------
+// History / admin lists
+// --------------------------------------------------
 const getHistory = async (userId) => {
   const result = await pool.query(
-    `SELECT points, type, description, created_at 
-     FROM loyalty_transactions 
-     WHERE user_id = $1 
-     ORDER BY created_at DESC 
+    `SELECT points, type, description, created_at
+     FROM loyalty_transactions
+     WHERE user_id = $1
+     ORDER BY created_at DESC
      LIMIT 50`,
     [userId]
   );
   return result.rows;
 };
 
-// Admin: all transactions
 const getAllTransactions = async (limit = 50) => {
   const result = await pool.query(
     `SELECT lt.id, lt.user_id, u.email, u.full_name,
@@ -164,7 +305,6 @@ const getAllTransactions = async (limit = 50) => {
   return result.rows;
 };
 
-// Admin: recent redemptions
 const getRecentRedemptions = async (limit = 20) => {
   const result = await pool.query(
     `SELECT lt.id, lt.user_id, u.email, u.full_name,
@@ -184,6 +324,8 @@ module.exports = {
   addPoints,
   generateQRPayload,
   redeemQR,
+  generateRewardQR,
+  scanRewardQR,
   getHistory,
   getAllTransactions,
   getRecentRedemptions

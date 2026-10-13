@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Loyalty | NutriFit Admin</title>
   <link rel="stylesheet" href="style.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
   <div class="admin-layout">
@@ -28,34 +29,69 @@
         <a href="index.html" class="logout" id="logoutBtn">Logout</a>
       </nav>
     </aside>
+
     <main class="main-content">
       <header class="topbar">
         <h1>Loyalty & Rewards</h1>
         <div class="admin-info" id="adminInfo">Admin</div>
       </header>
 
+      <!-- Generate QR from posted rewards -->
       <section class="content-card">
-        <h2>QR Code Validation</h2>
+        <h2>Generate Reward QR Code</h2>
         <p style="margin-bottom:12px;font-size:14px;color:#555;">
-          Paste the QR token from the mobile app to validate and redeem points.
+          Select a posted redeemable reward, generate a QR code, and display it at the gym.
+          Members scan this QR using the NutriFit app to claim the reward.
         </p>
+
         <div class="form-row">
-          <input type="text" id="qrToken" placeholder="Paste QR token here" style="flex:2;" />
-          <button class="btn btn-dark" id="redeemBtn">Validate & Redeem</button>
+          <select id="rewardSelect" style="flex:2;padding:8px 10px;border:1px solid #ccc;font-size:14px;">
+            <option value="">Loading rewards...</option>
+          </select>
+          <button class="btn btn-dark" id="generateQrBtn">Generate QR</button>
         </div>
-        <p id="redeemMsg" style="margin-top:10px;font-size:13px;"></p>
+        <p id="generateMsg" style="margin-top:10px;font-size:13px;"></p>
+
+        <div id="qrResult" style="display:none;margin-top:20px;text-align:center;">
+          <div id="qrcode" style="display:inline-block;padding:16px;border:1px solid #ddd;background:#fff;"></div>
+          <p id="qrRewardName" style="margin-top:12px;font-weight:600;font-size:15px;"></p>
+          <p id="qrPoints" style="font-size:14px;color:#555;"></p>
+          <p id="qrExpiry" style="font-size:13px;color:#777;"></p>
+          <p style="font-size:12px;color:#888;margin-top:8px;max-width:320px;margin-left:auto;margin-right:auto;">
+            Show this QR at the front desk. Members open NutriFit and scan to redeem.
+          </p>
+          <button class="btn" id="copyTokenBtn" style="margin-top:10px;">Copy QR Token</button>
+        </div>
       </section>
 
+      <!-- Active rewards list -->
       <section class="content-card">
-        <h2>Recent Transactions</h2>
-        <p style="font-size:13px;color:#666;margin-bottom:12px;">
-          Showing your own loyalty history (admin view of all users can be added later).
-        </p>
+        <h2>Active Redeemable Rewards</h2>
         <table>
           <thead>
             <tr>
+              <th>ID</th>
+              <th>Name</th>
+              <th>Points Required</th>
+              <th>Description</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="rewardsBody">
+            <tr><td colspan="6">Loading...</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- Recent redemptions -->
+      <section class="content-card">
+        <h2>Recent Redemptions</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>User</th>
               <th>Points</th>
-              <th>Type</th>
               <th>Description</th>
               <th>Date</th>
             </tr>
@@ -73,10 +109,12 @@
     const token = localStorage.getItem('token');
     const user = JSON.parse(localStorage.getItem('user') || 'null');
 
-    if (!token || !user || !['admin','super_admin','gym_manager'].includes(user.role)) {
+    if (!token || !user || !['admin', 'super_admin', 'gym_manager'].includes(user.role)) {
       window.location.href = 'index.html';
     }
-    document.getElementById('adminInfo').textContent = (user.full_name || user.email) + ' | ' + user.role;
+
+    document.getElementById('adminInfo').textContent =
+      (user.full_name || user.email) + ' | ' + user.role;
 
     document.getElementById('logoutBtn').addEventListener('click', (e) => {
       e.preventDefault();
@@ -85,51 +123,166 @@
     });
 
     function authHeaders() {
-      return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
+      return {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token
+      };
     }
 
-    document.getElementById('redeemBtn').addEventListener('click', async () => {
-      const qrToken = document.getElementById('qrToken').value.trim();
-      const msg = document.getElementById('redeemMsg');
-      if (!qrToken) {
+    let lastQrToken = null;
+    let rewardsCache = [];
+
+    // Load rewards into dropdown + table
+    async function loadRewards() {
+      const select = document.getElementById('rewardSelect');
+      const tbody = document.getElementById('rewardsBody');
+
+      try {
+        const res = await fetch(API + '/gym/rewards', { headers: authHeaders() });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Failed to load rewards');
+
+        const list = data.rewards || data || [];
+        rewardsCache = list;
+
+        const active = list.filter(r => r.is_active !== false);
+
+        if (!active.length) {
+          select.innerHTML = '<option value="">No active rewards — add some in Gym Settings</option>';
+        } else {
+          select.innerHTML =
+            '<option value="">Select a reward...</option>' +
+            active.map(r =>
+              `<option value="${r.id}">${r.name} (${r.points_required} pts)</option>`
+            ).join('');
+        }
+
+        if (!list.length) {
+          tbody.innerHTML = '<tr><td colspan="6">No rewards yet. Add them in Gym Settings.</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = list.map(r => `
+          <tr>
+            <td>${r.id}</td>
+            <td>${r.name}</td>
+            <td>${r.points_required}</td>
+            <td>${r.description || '-'}</td>
+            <td>
+              <span class="badge ${r.is_active ? 'success' : ''}">
+                ${r.is_active ? 'Active' : 'Inactive'}
+              </span>
+            </td>
+            <td>
+              ${r.is_active
+                ? `<button class="btn btn-dark" onclick="quickGenerate(${r.id})">Generate QR</button>`
+                : '-'}
+            </td>
+          </tr>
+        `).join('');
+      } catch (err) {
+        select.innerHTML = '<option value="">Failed to load rewards</option>';
+        tbody.innerHTML = `<tr><td colspan="6" style="color:#c62828;">${err.message}</td></tr>`;
+      }
+    }
+
+    function showQr(result, reward) {
+      const box = document.getElementById('qrResult');
+      const qrDiv = document.getElementById('qrcode');
+      qrDiv.innerHTML = '';
+
+      lastQrToken = result.qr_token || result.token;
+
+      new QRCode(qrDiv, {
+        text: lastQrToken,
+        width: 200,
+        height: 200,
+        correctLevel: QRCode.CorrectLevel.M
+      });
+
+      document.getElementById('qrRewardName').textContent =
+        reward ? reward.name : (result.reward_name || 'Reward');
+      document.getElementById('qrPoints').textContent =
+        (reward ? reward.points_required : result.points_required || result.points) + ' points required';
+      document.getElementById('qrExpiry').textContent =
+        result.expires_in_seconds
+          ? 'Valid for ' + Math.round(result.expires_in_seconds / 60) + ' minutes'
+          : (result.message || '');
+
+      box.style.display = 'block';
+    }
+
+    async function generateForReward(rewardId) {
+      const msg = document.getElementById('generateMsg');
+      msg.textContent = '';
+      msg.style.color = '#555';
+
+      if (!rewardId) {
         msg.style.color = '#c62828';
-        msg.textContent = 'Paste a QR token first';
+        msg.textContent = 'Select a reward first';
         return;
       }
+
+      const reward = rewardsCache.find(r => String(r.id) === String(rewardId));
+
       try {
-        const res = await fetch(API + '/loyalty/redeem', {
+        msg.textContent = 'Generating...';
+        const res = await fetch(API + '/loyalty/admin/generate-reward-qr', {
           method: 'POST',
           headers: authHeaders(),
-          body: JSON.stringify({ token: qrToken })
+          body: JSON.stringify({ reward_id: Number(rewardId) })
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.message || 'Redeem failed');
+        if (!res.ok) throw new Error(data.message || 'Failed to generate QR');
+
         msg.style.color = '#2e7d32';
-        msg.textContent = data.message || 'Redeemed successfully';
-        document.getElementById('qrToken').value = '';
-        loadHistory();
+        msg.textContent = data.message || 'QR generated successfully';
+        showQr(data, reward);
       } catch (err) {
         msg.style.color = '#c62828';
         msg.textContent = err.message;
+        document.getElementById('qrResult').style.display = 'none';
+      }
+    }
+
+    document.getElementById('generateQrBtn').addEventListener('click', () => {
+      const id = document.getElementById('rewardSelect').value;
+      generateForReward(id);
+    });
+
+    window.quickGenerate = function (id) {
+      document.getElementById('rewardSelect').value = String(id);
+      generateForReward(id);
+    };
+
+    document.getElementById('copyTokenBtn').addEventListener('click', async () => {
+      if (!lastQrToken) return;
+      try {
+        await navigator.clipboard.writeText(lastQrToken);
+        document.getElementById('generateMsg').style.color = '#2e7d32';
+        document.getElementById('generateMsg').textContent = 'QR token copied';
+      } catch (e) {
+        alert(lastQrToken);
       }
     });
 
-    async function loadHistory() {
+    async function loadRedemptions() {
       const tbody = document.getElementById('txTableBody');
       try {
-        const res = await fetch(API + '/loyalty/history', { headers: authHeaders() });
+        const res = await fetch(API + '/loyalty/admin/redemptions', { headers: authHeaders() });
         const data = await res.json();
         if (!res.ok) throw new Error(data.message || 'Failed');
 
-        const list = data.transactions || data.history || data || [];
+        const list = data.redemptions || data.transactions || data || [];
         if (!list.length) {
-          tbody.innerHTML = '<tr><td colspan="4">No transactions yet</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="4">No redemptions yet</td></tr>';
           return;
         }
+
         tbody.innerHTML = list.map(tx => `
           <tr>
+            <td>${tx.full_name || tx.email || tx.user_id}</td>
             <td>${tx.points}</td>
-            <td>${tx.type}</td>
             <td>${tx.description || '-'}</td>
             <td>${tx.created_at ? new Date(tx.created_at).toLocaleString() : '-'}</td>
           </tr>
@@ -139,7 +292,8 @@
       }
     }
 
-    loadHistory();
+    loadRewards();
+    loadRedemptions();
   </script>
 </body>
 </html>
