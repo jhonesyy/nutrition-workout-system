@@ -123,11 +123,11 @@ const getRedemptions = async (req, res) => {
 module.exports = {
   getMyPoints,
   getMyHistory,
-  earnPoints,
   generateQR,
   redeemQR,
-  generateRewardQr,
-  scanReward,
+  earnPoints,
   getAllHistory,
-  getRedemptions
+  getRedemptions,
+  generateRewardQr,
+  scanReward
 };

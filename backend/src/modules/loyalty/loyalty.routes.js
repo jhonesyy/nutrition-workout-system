@@ -11,23 +11,25 @@ const {
   generateRewardQr,
   scanReward
 } = require('./loyalty.controller');
-const {
-  authenticateToken,
-  authorizeRoles
-} = require('../../middleware/auth.middleware');
+const { authenticateToken, authorizeRoles } = require('../../middleware/auth.middleware');
 
-// -------------------- User --------------------
+// User
 router.get('/points', authenticateToken, getMyPoints);
 router.get('/history', authenticateToken, getMyHistory);
+router.post('/generate-qr', authenticateToken, generateQR);
 router.post('/earn', authenticateToken, earnPoints);
 
-// Old optional flow (user generates personal QR)
-router.post('/generate-qr', authenticateToken, generateQR);
-
-// NEW: user scans admin-generated reward QR in NutriFit app
+// NEW: user scans admin-generated reward QR
 router.post('/scan-reward', authenticateToken, scanReward);
 
-// -------------------- Admin / Gym staff --------------------
+// Staff / Admin redeem (old flow, optional)
+router.post(
+  '/redeem',
+  authenticateToken,
+  authorizeRoles('admin', 'gym_manager', 'super_admin'),
+  redeemQR
+);
+
 // NEW: admin generates QR for a posted reward
 router.post(
   '/admin/generate-reward-qr',
@@ -36,14 +38,7 @@ router.post(
   generateRewardQr
 );
 
-// Old staff redeem of user QR (optional keep)
-router.post(
-  '/redeem',
-  authenticateToken,
-  authorizeRoles('admin', 'gym_manager', 'super_admin'),
-  redeemQR
-);
-
+// Admin lists
 router.get(
   '/admin/transactions',
   authenticateToken,
