@@ -22,7 +22,7 @@ router.post('/earn', authenticateToken, earnPoints);
 // NEW: user scans admin-generated reward QR
 router.post('/scan-reward', authenticateToken, scanReward);
 
-// Staff / Admin redeem (old flow, optional)
+// Staff / Admin redeem (old flow)
 router.post(
   '/redeem',
   authenticateToken,
