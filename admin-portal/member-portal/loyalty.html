@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Loyalty | NutriFit</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <main class="main">
+      <div class="topbar">
+        <h1>Loyalty rewards</h1>
+        <div id="userChip" class="muted"></div>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <h3>Balance</h3>
+          <div class="stat-value" id="bal">—</div>
+        </div>
+        <div class="card">
+          <h3>Lifetime</h3>
+          <div class="stat-value" id="life">—</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Scan / paste reward QR</h2>
+        <p class="muted">
+          Admin generates a reward QR in the Admin Portal. Paste the token here (or use a phone camera
+          scanner that fills this field). This calls <code>POST /api/loyalty/scan-reward</code>.
+        </p>
+        <label>QR token</label>
+        <textarea id="qr_token" rows="3" placeholder="Paste qr_token from scanned QR"></textarea>
+        <button class="btn" type="button" id="btnScan">Redeem reward</button>
+        <p class="msg" id="scanMsg"></p>
+      </div>
+
+      <div class="card">
+        <h2>Available rewards (catalog)</h2>
+        <div id="rewardsBox" class="muted">Loading…</div>
+      </div>
+
+      <div class="card">
+        <h2>Transaction history</h2>
+        <table>
+          <thead><tr><th>When</th><th>Type</th><th>Points</th><th>Note</th></tr></thead>
+          <tbody id="txBody"><tr><td colspan="4">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+  <script src="api.js"></script>
+  <script src="nav.js"></script>
+  <script>
+    bootShell('loyalty.html');
+
+    async function loadPoints() {
+      try {
+        const p = await apiGet('/loyalty/points');
+        document.getElementById('bal').textContent = p.total_points ?? p.points ?? 0;
+        document.getElementById('life').textContent = p.lifetime_points ?? '—';
+      } catch (e) {
+        document.getElementById('bal').textContent = '—';
+      }
+    }
+
+    async function loadHistory() {
+      try {
+        const data = await apiGet('/loyalty/history');
+        const rows = Array.isArray(data) ? data : (data.history || data.transactions || []);
+        const body = document.getElementById('txBody');
+        if (!rows.length) {
+          body.innerHTML = '<tr><td colspan="4">No transactions</td></tr>';
+          return;
+        }
+        body.innerHTML = rows.map(r => `
+          <tr>
+            <td>${r.created_at ? new Date(r.created_at).toLocaleString() : '—'}</td>
+            <td>${r.type || '—'}</td>
+            <td>${r.points ?? '—'}</td>
+            <td>${r.description || '—'}</td>
+          </tr>`).join('');
+      } catch (e) {
+        document.getElementById('txBody').innerHTML =
+          `<tr><td colspan="4">${e.message}</td></tr>`;
+      }
+    }
+
+    async function loadRewards() {
+      try {
+        // public or auth gym rewards list
+        const data = await apiGet('/gym/rewards');
+        const rows = Array.isArray(data) ? data : (data.rewards || []);
+        const active = rows.filter(r => r.is_active !== false);
+        document.getElementById('rewardsBox').innerHTML = active.length
+          ? active.map(r =>
+              `<div style="margin:6px 0"><strong>${r.name}</strong> · ${r.points_required} pts
+               <div class="muted">${r.description || ''}</div></div>`
+            ).join('')
+          : 'No active rewards';
+      } catch (e) {
+        document.getElementById('rewardsBox').textContent =
+          'Could not load catalog: ' + e.message;
+      }
+    }
+
+    document.getElementById('btnScan').onclick = async () => {
+      const msg = document.getElementById('scanMsg');
+      const token = document.getElementById('qr_token').value.trim();
+      if (!token) {
+        msg.className = 'msg err';
+        msg.textContent = 'Paste a QR token first';
+        return;
+      }
+      try {
+        const res = await apiPost('/loyalty/scan-reward', { qr_token: token });
+        msg.className = 'msg ok';
+        msg.textContent = res.message || 'Reward claimed';
+        loadPoints();
+        loadHistory();
+      } catch (err) {
+        msg.className = 'msg err';
+        msg.textContent = err.message;
+      }
+    };
+
+    loadPoints();
+    loadHistory();
+    loadRewards();
+  </script>
+</body>
+</html>

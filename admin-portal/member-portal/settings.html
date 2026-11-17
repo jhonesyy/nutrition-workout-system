@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Settings | NutriFit</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <main class="main">
+      <div class="topbar">
+        <h1>Settings</h1>
+        <div id="userChip" class="muted"></div>
+      </div>
+
+      <div class="card">
+        <h2>Account</h2>
+        <p id="acctBox" class="muted">—</p>
+      </div>
+
+      <div class="card">
+        <h2>Change password</h2>
+        <form id="pwForm">
+          <label>Current password</label>
+          <input type="password" id="current_password" required />
+          <label>New password</label>
+          <input type="password" id="new_password" required minlength="6" />
+          <button class="btn" type="submit">Update password</button>
+          <p class="msg" id="pwMsg"></p>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Health data notice</h2>
+        <p class="muted">
+          Device health data (HealthKit / Health Connect) is only available via the native mobile apps.
+          This website stores only what you enter manually or what a mobile app sends to our API with your permission.
+        </p>
+      </div>
+    </main>
+  </div>
+  <script src="api.js"></script>
+  <script src="nav.js"></script>
+  <script>
+    bootShell('settings.html');
+    const u = getUser();
+    document.getElementById('acctBox').textContent =
+      (u && (u.full_name + ' · ' + u.email + ' · role ' + u.role)) || '—';
+
+    document.getElementById('pwForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById('pwMsg');
+      try {
+        await apiPost('/auth/change-password', {
+          current_password: document.getElementById('current_password').value,
+          new_password: document.getElementById('new_password').value
+        });
+        msg.className = 'msg ok';
+        msg.textContent = 'Password updated';
+        e.target.reset();
+      } catch (err) {
+        msg.className = 'msg err';
+        msg.textContent = err.message;
+      }
+    };
+  </script>
+</body>
+</html>

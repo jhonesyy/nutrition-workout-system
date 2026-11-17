@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Activity | NutriFit</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <main class="main">
+      <div class="topbar">
+        <h1>Activity logger</h1>
+        <div id="userChip" class="muted"></div>
+      </div>
+
+      <div class="card">
+        <h2>Manual activity (steps / calories)</h2>
+        <p class="muted">Same backend as Health Sync. Prefer one source per day to avoid confusion.</p>
+        <form id="actForm">
+          <div class="form-row">
+            <div>
+              <label>Steps</label>
+              <input type="number" id="steps" min="0" required />
+            </div>
+            <div>
+              <label>Active calories</label>
+              <input type="number" id="active_calories" min="0" step="0.1" required />
+            </div>
+          </div>
+          <button class="btn" type="submit">Save activity</button>
+          <p class="msg" id="actMsg"></p>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Workout history</h2>
+        <table>
+          <thead><tr><th>When</th><th>Exercise</th><th>Detail</th></tr></thead>
+          <tbody id="logBody"><tr><td colspan="3">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+  <script src="api.js"></script>
+  <script src="nav.js"></script>
+  <script>
+    bootShell('activity.html');
+
+    document.getElementById('actForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById('actMsg');
+      try {
+        await apiPost('/health/sync', {
+          steps: Number(document.getElementById('steps').value) || 0,
+          active_calories: Number(document.getElementById('active_calories').value) || 0
+        });
+        msg.className = 'msg ok';
+        msg.textContent = 'Activity saved';
+      } catch (err) {
+        msg.className = 'msg err';
+        msg.textContent = err.message;
+      }
+    };
+
+    (async () => {
+      try {
+        const data = await apiGet('/workouts/logs');
+        const rows = Array.isArray(data) ? data : (data.logs || []);
+        const body = document.getElementById('logBody');
+        if (!rows.length) {
+          body.innerHTML = '<tr><td colspan="3">No workout logs yet</td></tr>';
+          return;
+        }
+        body.innerHTML = rows.map(r => `
+          <tr>
+            <td>${r.created_at ? new Date(r.created_at).toLocaleString() : (r.log_date || '—')}</td>
+            <td>${r.exercise_name || r.name || ('#' + (r.exercise_id || ''))}</td>
+            <td>${r.sets || '—'} × ${r.reps || '—'} ${r.weight_kg ? r.weight_kg + 'kg' : ''}</td>
+          </tr>`).join('');
+      } catch (e) {
+        document.getElementById('logBody').innerHTML =
+          `<tr><td colspan="3">${e.message}</td></tr>`;
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Health Sync | NutriFit</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <main class="main">
+      <div class="topbar"><h1>Health Integration</h1><div id="userChip" class="muted"></div></div>
+
+      <div class="card">
+        <h2>What this page can and cannot do</h2>
+        <p class="muted">
+          <strong>Apple HealthKit</strong> and <strong>Google Health Connect</strong> only work inside
+          native iOS/Android apps with user permission. This web member portal cannot read those APIs
+          from Safari/Chrome. Device data must be sent by the NutriFit mobile app to
+          <code>POST /api/health/sync</code>.
+        </p>
+        <p class="muted">
+          Here you can <strong>manually sync</strong> steps and active calories (source = manual),
+          and view history stored in the same database the mobile apps use.
+        </p>
+      </div>
+
+      <div class="card">
+        <h2>Manual sync (today)</h2>
+        <form id="syncForm">
+          <div class="form-row">
+            <div>
+              <label>Steps</label>
+              <input type="number" id="steps" min="0" required />
+            </div>
+            <div>
+              <label>Active calories</label>
+              <input type="number" id="active_calories" min="0" step="0.1" required />
+            </div>
+          </div>
+          <button class="btn" type="submit">Sync now</button>
+          <p class="msg" id="syncMsg"></p>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Today</h2>
+        <p id="todayBox">—</p>
+      </div>
+
+      <div class="card">
+        <h2>History</h2>
+        <table>
+          <thead><tr><th>Date</th><th>Steps</th><th>Active kcal</th><th>Source</th></tr></thead>
+          <tbody id="histBody"><tr><td colspan="4">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+  <script src="api.js"></script>
+  <script src="nav.js"></script>
+  <script>
+    bootShell('health.html');
+
+    async function refresh() {
+      try {
+        const today = await apiGet('/health/today');
+        document.getElementById('todayBox').textContent =
+          `Steps ${today.steps ?? 0} · Active ${today.active_calories ?? 0} kcal · source ${today.source || '—'}`;
+        document.getElementById('steps').value = today.steps ?? '';
+        document.getElementById('active_calories').value = today.active_calories ?? '';
+      } catch (e) {
+        document.getElementById('todayBox').textContent = e.message;
+      }
+      try {
+        const hist = await apiGet('/health/history');
+        const rows = Array.isArray(hist) ? hist : (hist.history || hist.logs || []);
+        const body = document.getElementById('histBody');
+        if (!rows.length) {
+          body.innerHTML = '<tr><td colspan="4">No records</td></tr>';
+          return;
+        }
+        body.innerHTML = rows.map(r => `
+          <tr>
+            <td>${r.log_date || r.date || '—'}</td>
+            <td>${r.steps ?? 0}</td>
+            <td>${r.active_calories ?? 0}</td>
+            <td>${r.source || '—'}</td>
+          </tr>`).join('');
+      } catch (e) {
+        document.getElementById('histBody').innerHTML =
+          `<tr><td colspan="4">${e.message}</td></tr>`;
+      }
+    }
+
+    document.getElementById('syncForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById('syncMsg');
+      try {
+        await apiPost('/health/sync', {
+          steps: Number(document.getElementById('steps').value) || 0,
+          active_calories: Number(document.getElementById('active_calories').value) || 0
+        });
+        msg.className = 'msg ok';
+        msg.textContent = 'Synced (manual).';
+        refresh();
+      } catch (err) {
+        msg.className = 'msg err';
+        msg.textContent = err.message;
+      }
+    };
+
+    refresh();
+  </script>
+</body>
+</html>

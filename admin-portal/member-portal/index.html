@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NutriFit Member</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <h1 style="margin-top:0">NutriFit</h1>
+      <p class="muted">Member access for House of Strength GYM</p>
+
+      <div style="display:flex;gap:8px;margin:16px 0">
+        <button class="btn" id="tabLogin" type="button">Login</button>
+        <button class="btn secondary" id="tabRegister" type="button">Register</button>
+      </div>
+
+      <form id="loginForm">
+        <label>Email</label>
+        <input type="email" id="loginEmail" required />
+        <label>Password</label>
+        <input type="password" id="loginPassword" required minlength="6" />
+        <button class="btn" type="submit" style="width:100%">Login</button>
+        <p class="msg" id="loginMsg"></p>
+      </form>
+
+      <form id="registerForm" hidden>
+        <label>Full name</label>
+        <input type="text" id="regName" required />
+        <label>Email</label>
+        <input type="email" id="regEmail" required />
+        <label>Password</label>
+        <input type="password" id="regPassword" required minlength="6" />
+        <button class="btn" type="submit" style="width:100%">Create account</button>
+        <p class="msg" id="regMsg"></p>
+      </form>
+    </div>
+  </div>
+
+  <script src="api.js"></script>
+  <script>
+    if (getToken() && getUser()) {
+      window.location.href = 'dashboard.html';
+    }
+
+    const loginForm = document.getElementById('loginForm');
+    const registerForm = document.getElementById('registerForm');
+
+    document.getElementById('tabLogin').onclick = () => {
+      loginForm.hidden = false;
+      registerForm.hidden = true;
+    };
+    document.getElementById('tabRegister').onclick = () => {
+      loginForm.hidden = true;
+      registerForm.hidden = false;
+    };
+
+    loginForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById('loginMsg');
+      msg.textContent = '';
+      msg.className = 'msg';
+      try {
+        const data = await apiPost('/auth/login', {
+          email: document.getElementById('loginEmail').value.trim(),
+          password: document.getElementById('loginPassword').value
+        });
+        setSession(data.token, data.user);
+        window.location.href = 'dashboard.html';
+      } catch (err) {
+        msg.className = 'msg err';
+        msg.textContent = err.message;
+      }
+    };
+
+    registerForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById('regMsg');
+      msg.textContent = '';
+      try {
+        await apiPost('/auth/register', {
+          full_name: document.getElementById('regName').value.trim(),
+          email: document.getElementById('regEmail').value.trim(),
+          password: document.getElementById('regPassword').value
+        });
+        msg.className = 'msg ok';
+        msg.textContent = 'Account created. Please login.';
+        loginForm.hidden = false;
+        registerForm.hidden = true;
+      } catch (err) {
+        msg.className = 'msg err';
+        msg.textContent = err.message;
+      }
+    };
+  </script>
+</body>
+</html>

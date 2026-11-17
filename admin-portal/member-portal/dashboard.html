@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dashboard | NutriFit</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <main class="main">
+      <div class="topbar">
+        <h1>Dashboard</h1>
+        <div class="muted" id="userChip"></div>
+      </div>
+
+      <div class="grid">
+        <div class="card"><h3>Calories target</h3><div class="stat-value" id="calTarget">—</div></div>
+        <div class="card"><h3>Steps today</h3><div class="stat-value" id="steps">—</div></div>
+        <div class="card"><h3>Active kcal</h3><div class="stat-value" id="activeKcal">—</div></div>
+        <div class="card"><h3>Loyalty pts</h3><div class="stat-value" id="points">—</div></div>
+      </div>
+
+      <div class="card">
+        <h2>Today nutrition</h2>
+        <p class="muted" id="mealSummary">Loading…</p>
+        <div class="progress"><span id="calBar" style="width:0%"></span></div>
+        <p class="muted" id="macroLine"></p>
+      </div>
+
+      <div class="card">
+        <h2>Health sync status</h2>
+        <p class="muted">
+          Browser cannot read Apple HealthKit or Google Health Connect.
+          Use <a href="health.html">Health Sync</a> for manual entry, or the NutriFit mobile app
+          (native) to push device data into the same API.
+        </p>
+        <p id="healthStatus">—</p>
+      </div>
+    </main>
+  </div>
+  <script src="api.js"></script>
+  <script src="nav.js"></script>
+  <script>
+    bootShell('dashboard.html');
+
+    (async () => {
+      try {
+        const [tdee, today, points, summary] = await Promise.all([
+          apiGet('/users/tdee').catch(() => null),
+          apiGet('/health/today').catch(() => null),
+          apiGet('/loyalty/points').catch(() => null),
+          apiGet('/meals/summary').catch(() => null)
+        ]);
+
+        if (tdee) {
+          document.getElementById('calTarget').textContent =
+            Math.round(tdee.tdee || tdee.daily_calories || tdee.calories || 0) || '—';
+        }
+        if (today) {
+          document.getElementById('steps').textContent = today.steps ?? 0;
+          document.getElementById('activeKcal').textContent = today.active_calories ?? 0;
+          document.getElementById('healthStatus').textContent =
+            'Last source: ' + (today.source || 'manual / none') +
+            (today.updated_at ? ' · ' + new Date(today.updated_at).toLocaleString() : '');
+        }
+        if (points) {
+          document.getElementById('points').textContent =
+            points.total_points ?? points.points ?? 0;
+        }
+        if (summary) {
+          const consumed = summary.total_calories ?? summary.calories ?? 0;
+          const target = Number(document.getElementById('calTarget').textContent) || 1;
+          const pct = Math.min(100, Math.round((consumed / target) * 100));
+          document.getElementById('mealSummary').textContent =
+            consumed + ' kcal logged today';
+          document.getElementById('calBar').style.width = pct + '%';
+          document.getElementById('macroLine').textContent =
+            `P ${summary.total_protein_g ?? summary.protein_g ?? '—'}g · ` +
+            `C ${summary.total_carbs_g ?? summary.carbs_g ?? '—'}g · ` +
+            `F ${summary.total_fat_g ?? summary.fat_g ?? '—'}g`;
+        } else {
+          document.getElementById('mealSummary').textContent = 'No meals logged today';
+        }
+      } catch (e) {
+        document.getElementById('mealSummary').textContent = e.message;
+      }
+    })();
+  </script>
+</body>
+</html>
