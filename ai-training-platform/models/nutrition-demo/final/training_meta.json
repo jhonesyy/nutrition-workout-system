@@ -1,0 +1,4 @@
+{
+  "is_lora": true,
+  "base_model": "distilgpt2"
+}
