@@ -91,6 +91,12 @@
   </div>
 
   <script>
+    // SMART API SWITCHING
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const API_BASE = isLocalhost 
+      ? 'http://localhost:5000/api' 
+      : 'https://nutrition-workout-system-production.up.railway.app/api';
+
     const token = localStorage.getItem('token');
     const user = JSON.parse(localStorage.getItem('user') || 'null');
 
@@ -118,7 +124,6 @@
     // Logout
     document.getElementById('logoutBtn').addEventListener('click', (e) => {
       e.preventDefault();
-
       localStorage.clear();
       window.location.href = 'index.html';
     });
@@ -154,7 +159,7 @@
 
       try {
         const res = await fetch(
-          'https://nutrition-workout-system-production.up.railway.app/api/auth/change-password',
+          `${API_BASE}/auth/change-password`,
           {
             method: 'POST',
 

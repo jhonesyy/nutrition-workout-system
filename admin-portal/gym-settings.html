@@ -34,7 +34,6 @@
         <div class="admin-info" id="adminInfo">Admin</div>
       </header>
 
-      <!-- Gym Profile -->
       <section class="content-card">
         <h2>Gym Profile</h2>
         <form id="settingsForm">
@@ -51,7 +50,6 @@
         <p id="settingsMsg" style="margin-top:8px;font-size:13px;"></p>
       </section>
 
-      <!-- Rewards -->
       <section class="content-card">
         <h2 id="rewardFormTitle">Add Redeemable Reward</h2>
         <form id="rewardForm">
@@ -86,7 +84,12 @@
   </div>
 
   <script>
-    const API = 'https://nutrition-workout-system-production.up.railway.app/api';
+    // SMART API SWITCHING
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const API_BASE = isLocalhost 
+      ? 'http://localhost:5000/api' 
+      : 'https://nutrition-workout-system-production.up.railway.app/api';
+
     const token = localStorage.getItem('token');
     const user = JSON.parse(localStorage.getItem('user') || 'null');
 
@@ -104,10 +107,9 @@
       return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
     }
 
-    // ---- Gym Settings ----
     async function loadSettings() {
       try {
-        const res = await fetch(API + '/gym/settings');
+        const res = await fetch(API_BASE + '/gym/settings');
         const data = await res.json();
         if (data) {
           document.getElementById('gym_name').value = data.name || '';
@@ -122,7 +124,7 @@
       e.preventDefault();
       const msg = document.getElementById('settingsMsg');
       try {
-        const res = await fetch(API + '/gym/settings', {
+        const res = await fetch(API_BASE + '/gym/settings', {
           method: 'PUT',
           headers: authHeaders(),
           body: JSON.stringify({
@@ -142,7 +144,6 @@
       }
     });
 
-    // ---- Rewards ----
     function resetRewardForm() {
       document.getElementById('rewardForm').reset();
       document.getElementById('reward_id').value = '';
@@ -155,7 +156,7 @@
     async function loadRewards() {
       const tbody = document.getElementById('rewardsBody');
       try {
-        const res = await fetch(API + '/gym/rewards', { headers: authHeaders() });
+        const res = await fetch(API_BASE + '/gym/rewards', { headers: authHeaders() });
         const data = await res.json();
         if (!res.ok) throw new Error(data.message || 'Failed');
         const list = data.rewards || data;
@@ -169,13 +170,9 @@
             <td>${r.name}</td>
             <td>${r.points_required}</td>
             <td>${r.description || '-'}</td>
+            <td><span class="badge ${r.is_active ? 'success' : ''}">${r.is_active ? 'Active' : 'Inactive'}</span></td>
             <td>
-              <span class="badge ${r.is_active ? 'success' : ''}">
-                ${r.is_active ? 'Active' : 'Inactive'}
-              </span>
-            </td>
-            <td>
-              <button class="btn" onclick='editReward(${JSON.stringify(r)})'>Edit</button>
+              <button class="btn" onclick='editReward(${JSON.stringify(r).replace(/'/g, "&#39;")})'>Edit</button>
               ${r.is_active
                 ? `<button class="btn" onclick="setRewardActive(${r.id}, false)" style="margin-left:4px;color:#c62828;">Deactivate</button>`
                 : `<button class="btn" onclick="setRewardActive(${r.id}, true)" style="margin-left:4px;color:#2e7d32;">Activate</button>`
@@ -188,7 +185,6 @@
       }
     }
 
-    // Add or Update
     document.getElementById('rewardForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const msg = document.getElementById('rewardMsg');
@@ -201,7 +197,7 @@
       };
 
       try {
-        const url = id ? `${API}/gym/rewards/${id}` : `${API}/gym/rewards`;
+        const url = id ? `${API_BASE}/gym/rewards/${id}` : `${API_BASE}/gym/rewards`;
         const method = id ? 'PUT' : 'POST';
 
         const res = await fetch(url, {
@@ -222,7 +218,6 @@
       }
     });
 
-    // Edit → fill form
     window.editReward = function (r) {
       document.getElementById('reward_id').value = r.id;
       document.getElementById('reward_name').value = r.name || '';
@@ -236,13 +231,12 @@
 
     document.getElementById('rewardCancelBtn').addEventListener('click', resetRewardForm);
 
-    // Activate / Deactivate
     window.setRewardActive = async function (id, is_active) {
       const action = is_active ? 'activate' : 'deactivate';
       if (!confirm(`Are you sure you want to ${action} this reward?`)) return;
 
       try {
-        const res = await fetch(`${API}/gym/rewards/${id}`, {
+        const res = await fetch(`${API_BASE}/gym/rewards/${id}`, {
           method: 'PUT',
           headers: authHeaders(),
           body: JSON.stringify({ is_active })

@@ -90,7 +90,12 @@
   </div>
 
   <script>
-    const API = 'https://nutrition-workout-system-production.up.railway.app/api';
+    // SMART API SWITCHING
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const API_BASE = isLocalhost 
+      ? 'http://localhost:5000/api' 
+      : 'https://nutrition-workout-system-production.up.railway.app/api';
+
     const token = localStorage.getItem('token');
     const user = JSON.parse(localStorage.getItem('user') || 'null');
 
@@ -139,9 +144,10 @@
       tbody.innerHTML = '<tr><td colspan="9">Loading...</td></tr>';
 
       try {
+        // FIXED: Changed API to API_BASE
         const url = search
-          ? `${API}/foods?search=${encodeURIComponent(search)}`
-          : `${API}/foods`;
+          ? `${API_BASE}/foods?search=${encodeURIComponent(search)}`
+          : `${API_BASE}/foods`;
 
         const res = await fetch(url, { headers: authHeaders() });
         const data = await res.json();
@@ -166,7 +172,7 @@
             <td>${f.fat_g ?? '-'}g</td>
             <td>${(f.allergen_tags || []).join(', ') || 'None'}</td>
             <td>
-              <button class="btn" onclick='editFood(${JSON.stringify(f)})'>Edit</button>
+              <button class="btn" onclick='editFood(${JSON.stringify(f).replace(/'/g, "&apos;")})'>Edit</button>
               <button class="btn" onclick="deleteFood(${f.id})" style="margin-left:4px;color:#c62828;">Delete</button>
             </td>
           </tr>
@@ -198,7 +204,8 @@
       };
 
       try {
-        const url = id ? `${API}/foods/${id}` : `${API}/foods`;
+        // FIXED: Changed API to API_BASE
+        const url = id ? `${API_BASE}/foods/${id}` : `${API_BASE}/foods`;
         const method = id ? 'PUT' : 'POST';
 
         const res = await fetch(url, {
@@ -244,7 +251,8 @@
       if (!confirm('Delete this food?')) return;
 
       try {
-        const res = await fetch(`${API}/foods/${id}`, {
+        // FIXED: Changed API to API_BASE
+        const res = await fetch(`${API_BASE}/foods/${id}`, {
           method: 'DELETE',
           headers: authHeaders()
         });

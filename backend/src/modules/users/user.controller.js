@@ -122,10 +122,10 @@ const createStaffAccount = async (req, res) => {
       });
     }
 
-    // Only these roles can be created from admin portal
-    if (!['admin', 'gym_manager'].includes(role)) {
+    // UPDATED: Allow 'user' role to be created from the admin portal
+    if (!['admin', 'gym_manager', 'user'].includes(role)) {
       return res.status(400).json({
-        message: 'Role must be admin or gym_manager'
+        message: 'Role must be admin, gym_manager, or user'
       });
     }
 
@@ -137,12 +137,12 @@ const createStaffAccount = async (req, res) => {
     });
 
     res.status(201).json({
-      message: 'Staff account created successfully',
+      message: 'Account created successfully',
       user
     });
 
   } catch (error) {
-    console.error('Create staff account error:', error);
+    console.error('Create account error:', error);
 
     res.status(400).json({
       message: error.message

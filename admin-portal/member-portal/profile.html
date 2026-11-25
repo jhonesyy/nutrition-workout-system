@@ -67,7 +67,7 @@
       </div>
     </main>
   </div>
-  <script src="api.js"></script>
+    <script src="api.js"></script>
   <script src="nav.js"></script>
   <script>
     bootShell('profile.html');
@@ -75,6 +75,7 @@
     function setAllergens(arr) {
       document.getElementById('allergens').value = Array.isArray(arr) ? arr.join(', ') : '';
     }
+    
     function getAllergens() {
       return document.getElementById('allergens').value
         .split(',')
@@ -85,30 +86,50 @@
     (async () => {
       try {
         const data = await apiGet('/users/profile');
-        const p = data.profile || data;
+        // SAFE FALLBACK: Ensure 'p' is always an object, never null
+        const p = data?.profile || data || {}; 
+        
         document.getElementById('age').value = p.age ?? '';
-        document.getElementById('sex').value = (p.sex || '').toLowerCase();
+        
+        // SAFE toLowerCase: Check if p.sex exists and is a string first
+        document.getElementById('sex').value = (p.sex && typeof p.sex === 'string') 
+          ? p.sex.toLowerCase() 
+          : '';
+          
         document.getElementById('height_cm').value = p.height_cm ?? '';
         document.getElementById('weight_kg').value = p.weight_kg ?? '';
-        if (p.activity_factor) document.getElementById('activity_factor').value = String(p.activity_factor);
+        
+        if (p.activity_factor) {
+          document.getElementById('activity_factor').value = String(p.activity_factor);
+        }
+        
         document.getElementById('goal_type').value = p.goal_type || '';
         document.getElementById('goal_category').value = p.goal_category || '';
         setAllergens(p.allergens);
+        
       } catch (e) {
+        console.error('Profile load error:', e);
         document.getElementById('msg').className = 'msg err';
-        document.getElementById('msg').textContent = e.message;
+        document.getElementById('msg').textContent = 'Could not load profile data.';
       }
+
       try {
         const t = await apiGet('/users/tdee');
-        document.getElementById('tdeeBox').textContent =
-          `BMR: ${Math.round(t.bmr || 0)} · TDEE: ${Math.round(t.tdee || t.daily_calories || 0)} kcal` +
-          (t.macros ? ` · P/C/F targets available from API` : '');
-      } catch (_) {}
+        const bmr = Math.round(t?.bmr || 0);
+        const tdee = Math.round(t?.tdee || t?.daily_calories || 0);
+        document.getElementById('tdeeBox').textContent = 
+          `BMR: ${bmr} · TDEE: ${tdee} kcal` + (t?.macros ? ' · P/C/F targets available' : '');
+      } catch (e) {
+        console.error('TDEE load error:', e);
+      }
     })();
 
     document.getElementById('profileForm').onsubmit = async (e) => {
       e.preventDefault();
       const msg = document.getElementById('msg');
+      msg.className = 'msg';
+      msg.textContent = 'Saving...';
+      
       try {
         await apiPut('/users/profile', {
           age: Number(document.getElementById('age').value) || null,
@@ -120,11 +141,16 @@
           goal_category: document.getElementById('goal_category').value || null,
           allergens: getAllergens()
         });
+        
         msg.className = 'msg ok';
-        msg.textContent = 'Profile saved. Recalculating…';
+        msg.textContent = 'Profile saved successfully!';
+        
+        // Refresh TDEE after save
         const t = await apiGet('/users/tdee');
-        document.getElementById('tdeeBox').textContent =
-          `BMR: ${Math.round(t.bmr || 0)} · TDEE: ${Math.round(t.tdee || t.daily_calories || 0)} kcal`;
+        const bmr = Math.round(t?.bmr || 0);
+        const tdee = Math.round(t?.tdee || t?.daily_calories || 0);
+        document.getElementById('tdeeBox').textContent = `BMR: ${bmr} · TDEE: ${tdee} kcal`;
+        
       } catch (err) {
         msg.className = 'msg err';
         msg.textContent = err.message;

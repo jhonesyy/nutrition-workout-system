@@ -3,86 +3,227 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Activity | NutriFit</title>
+  <title>Activity | NutriFit Member</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div class="app" id="app">
     <main class="main">
       <div class="topbar">
-        <h1>Activity logger</h1>
-        <div id="userChip" class="muted"></div>
+        <h1>Activity & Workouts</h1>
+        <div id="userChip" class="muted">Member</div>
       </div>
 
+      <!-- 1. STATS GRID -->
+      <div class="grid">
+        <div class="card">
+          <h3>Workouts This Week</h3>
+          <div class="stat-value" id="statWeeklyWorkouts">0</div>
+        </div>
+        <div class="card">
+          <h3>Total Volume (kg)</h3>
+          <div class="stat-value" id="statVolume">0</div>
+        </div>
+      </div>
+
+      <!-- 2. DATASET-DRIVEN RECOMMENDATIONS -->
       <div class="card">
-        <h2>Manual activity (steps / calories)</h2>
-        <p class="muted">Same backend as Health Sync. Prefer one source per day to avoid confusion.</p>
-        <form id="actForm">
+        <h2>Recommended Workouts</h2>
+        <p class="muted" id="recGoalLine">Based on your profile goal (dataset-driven).</p>
+        <button class="btn secondary" type="button" id="btnRecWorkouts">Refresh Recommendations</button>
+        <div id="recWorkoutList" style="margin-top:12px"></div>
+      </div>
+
+      <!-- 3. AI CUSTOM PLAN GENERATOR -->
+      <div class="card">
+        <h2>AI Custom Workout Plan</h2>
+        <p class="muted">Ask your trained AI to generate a tailored routine based on your specific goals.</p>
+        <button class="btn" type="button" id="btnAskAI">Generate AI Plan</button>
+        <div id="aiResultBox" style="margin-top:12px"></div>
+      </div>
+
+      <!-- 4. LOG WORKOUT FORM -->
+      <div class="card">
+        <h2>Log a Workout Set</h2>
+        <form id="workoutLogForm">
+          <input type="hidden" id="log_exercise_id" required />
           <div class="form-row">
             <div>
-              <label>Steps</label>
-              <input type="number" id="steps" min="0" required />
+              <label>Exercise</label>
+              <input type="text" id="log_exercise_name" readonly placeholder="Select from recommendations above" />
             </div>
             <div>
-              <label>Active calories</label>
-              <input type="number" id="active_calories" min="0" step="0.1" required />
+              <label>Sets</label>
+              <input type="number" id="log_sets" min="1" value="3" />
             </div>
           </div>
-          <button class="btn" type="submit">Save activity</button>
-          <p class="msg" id="actMsg"></p>
+          <div class="form-row">
+            <div>
+              <label>Reps</label>
+              <input type="number" id="log_reps" min="1" value="10" />
+            </div>
+            <div>
+              <label>Weight (kg)</label>
+              <input type="number" id="log_weight" min="0" step="0.5" value="0" />
+            </div>
+          </div>
+          <button class="btn" type="submit">Save Workout Log</button>
+          <p class="msg" id="logMsg"></p>
         </form>
       </div>
 
+      <!-- 5. WORKOUT HISTORY -->
       <div class="card">
-        <h2>Workout history</h2>
+        <h2>Recent Workout History</h2>
         <table>
-          <thead><tr><th>When</th><th>Exercise</th><th>Detail</th></tr></thead>
-          <tbody id="logBody"><tr><td colspan="3">Loading…</td></tr></tbody>
+          <thead>
+            <tr><th>Date</th><th>Exercise</th><th>Sets</th><th>Reps</th><th>Weight</th></tr>
+          </thead>
+          <tbody id="historyBody"><tr><td colspan="5">Loading…</td></tr></tbody>
         </table>
       </div>
     </main>
   </div>
+
   <script src="api.js"></script>
   <script src="nav.js"></script>
   <script>
     bootShell('activity.html');
 
-    document.getElementById('actForm').onsubmit = async (e) => {
-      e.preventDefault();
-      const msg = document.getElementById('actMsg');
+    // ---------- 1. STATS (Placeholder for now) ----------
+    async function loadStats() {
+      document.getElementById('statWeeklyWorkouts').textContent = '—';
+      document.getElementById('statVolume').textContent = '—';
+    }
+
+    // ---------- 2. DATASET RECOMMENDATIONS ----------
+    async function loadWorkoutRecs() {
+      const box = document.getElementById('recWorkoutList');
+      box.innerHTML = '<p class="muted">Loading…</p>';
       try {
-        await apiPost('/health/sync', {
-          steps: Number(document.getElementById('steps').value) || 0,
-          active_calories: Number(document.getElementById('active_calories').value) || 0
+        const data = await apiGet('/workouts/recommend') || {};
+        const groups = Array.isArray(data.recommendations) ? data.recommendations : [];
+        document.getElementById('recGoalLine').textContent = `Goal: ${data.goal || 'general'} · focus: ${data.weekly_focus || 'balanced'}`;
+
+        if (!groups.length) {
+          box.innerHTML = '<p class="muted">No exercises in dataset yet. Add them in Admin → Exercises.</p>';
+          return;
+        }
+
+        let html = '';
+        groups.forEach(g => {
+          const list = Array.isArray(g.exercises) ? g.exercises : [];
+          html += `<div style="margin:14px 0 6px"><strong>${g.focus}</strong><span class="muted"> — ${g.reason || ''}</span></div>`;
+          if (!list.length) {
+            html += '<p class="muted" style="margin:4px 0 8px">No matching exercises.</p>';
+            return;
+          }
+          html += list.map(e => `
+            <div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px">
+              <strong>${e.name || 'Unknown'}</strong>
+              <span class="muted"> · ${e.muscle_group || '—'} · ${e.equipment || '—'} · ${e.difficulty || '—'}</span>
+              <div class="muted">Suggested: ${e.default_sets || 3} × ${e.default_reps || '10'}</div>
+              <button class="btn secondary" type="button"
+                data-id="${e.id}" data-name="${(e.name||'').replace(/"/g,'&quot;')}"
+                data-sets="${e.default_sets||3}" data-reps="${(e.default_reps||'10')}">Log this</button>
+            </div>`).join('');
         });
-        msg.className = 'msg ok';
-        msg.textContent = 'Activity saved';
+        box.innerHTML = html;
+
+        box.querySelectorAll('button[data-id]').forEach(b => {
+          b.onclick = () => {
+            document.getElementById('log_exercise_id').value = b.dataset.id;
+            document.getElementById('log_exercise_name').value = b.dataset.name;
+            document.getElementById('log_sets').value = b.dataset.sets;
+            document.getElementById('log_reps').value = b.dataset.reps;
+            document.getElementById('logMsg').className = 'msg';
+            document.getElementById('logMsg').textContent = 'Ready to log!';
+            document.getElementById('workoutLogForm').scrollIntoView({behavior:'smooth', block:'center'});
+          };
+        });
+      } catch (e) {
+        console.error('Workout rec error:', e);
+        box.innerHTML = `<p class="msg err">${e.message}</p>`;
+      }
+    }
+    document.getElementById('btnRecWorkouts').onclick = loadWorkoutRecs;
+
+    // ---------- 3. AI CUSTOM PLAN ----------
+    async function askAIWorkoutPlan() {
+      const box = document.getElementById('aiResultBox');
+      box.innerHTML = '<p class="muted">Asking AI to generate a custom plan based on your profile...</p>';
+      try {
+        const profile = await apiGet('/users/profile').catch(() => ({}));
+        const p = profile.profile || profile || {};
+        const goal = p.goal_type || 'general fitness';
+        
+        const prompt = `Create a concise, 3-day workout split for a user whose goal is "${goal}". Use practical advice. Format with clear bullet points.`;
+        
+        const res = await apiPost('/ai/chat', {
+          message: prompt,
+          user_id: String(getUser().id),
+          user_context: { goal: goal }
+        });
+        
+        const text = res.response || (res.data && res.data.response) || 'No response generated.';
+        // Simple markdown-to-HTML conversion
+        const formatted = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
+        box.innerHTML = `<div style="background:#121820;padding:12px;border-radius:8px;border:1px solid var(--border)">${formatted}</div>`;
+      } catch (e) {
+        console.error('AI error:', e);
+        box.innerHTML = `<p class="msg err">${e.message}</p>`;
+      }
+    }
+    document.getElementById('btnAskAI').onclick = askAIWorkoutPlan;
+
+    // ---------- 4. LOG WORKOUT ----------
+    document.getElementById('workoutLogForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById('logMsg');
+      msg.className = 'msg'; msg.textContent = 'Saving…';
+      try {
+        await apiPost('/workouts/log', {
+          exercise_id: Number(document.getElementById('log_exercise_id').value),
+          sets_completed: Number(document.getElementById('log_sets').value) || 0,
+          reps_completed: Number(document.getElementById('log_reps').value) || 0,
+          weight_kg: Number(document.getElementById('log_weight').value) || 0
+        });
+        msg.className = 'msg ok'; msg.textContent = 'Workout logged successfully!';
+        document.getElementById('workoutLogForm').reset();
+        loadHistory(); // Refresh table
       } catch (err) {
-        msg.className = 'msg err';
-        msg.textContent = err.message;
+        msg.className = 'msg err'; msg.textContent = err.message;
       }
     };
 
-    (async () => {
+    // ---------- 5. HISTORY ----------
+    async function loadHistory() {
+      const body = document.getElementById('historyBody');
       try {
-        const data = await apiGet('/workouts/logs');
-        const rows = Array.isArray(data) ? data : (data.logs || []);
-        const body = document.getElementById('logBody');
+        const data = await apiGet('/workouts/history?limit=20') || {};
+        const rows = Array.isArray(data.history) ? data.history : [];
         if (!rows.length) {
-          body.innerHTML = '<tr><td colspan="3">No workout logs yet</td></tr>';
+          body.innerHTML = '<tr><td colspan="5">No workouts logged yet.</td></tr>';
           return;
         }
         body.innerHTML = rows.map(r => `
           <tr>
-            <td>${r.created_at ? new Date(r.created_at).toLocaleString() : (r.log_date || '—')}</td>
-            <td>${r.exercise_name || r.name || ('#' + (r.exercise_id || ''))}</td>
-            <td>${r.sets || '—'} × ${r.reps || '—'} ${r.weight_kg ? r.weight_kg + 'kg' : ''}</td>
-          </tr>`).join('');
+            <td>${r.log_date || '—'}</td>
+            <td>${r.exercise_name || 'Unknown'}</td>
+            <td>${r.sets_completed ?? '—'}</td>
+            <td>${r.reps_completed ?? '—'}</td>
+            <td>${r.weight_kg != null ? r.weight_kg + ' kg' : '—'}</td>
+          </tr>
+        `).join('');
       } catch (e) {
-        document.getElementById('logBody').innerHTML =
-          `<tr><td colspan="3">${e.message}</td></tr>`;
+        body.innerHTML = `<tr><td colspan="5" class="msg err">${e.message}</td></tr>`;
       }
-    })();
+    }
+
+    // Init
+    loadStats();
+    loadWorkoutRecs();
+    loadHistory();
   </script>
 </body>
 </html>

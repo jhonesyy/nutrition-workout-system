@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Assistant - House of Strength GYM</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="ai-chat.css">
+</head>
+<body>
+  <div class="ai-chat-container" id="ai-chat-widget">
+    <div class="ai-chat-header">
+      <span>🤖 Multi-AI Fitness Assistant</span>
+      <button onclick="location.reload()" style="background:none; border:none; color:white; cursor:pointer;">🔄 Clear</button>
+    </div>
+    
+    <div class="ai-chat-messages">
+      <div class="ai-message assistant">Hello! I'm your AI assistant. You can choose which AI model answers you, or compare all three at once!</div>
+    </div>
+    
+    <div class="ai-typing-indicator">AI is thinking...</div>
+    <div class="ai-error-message"></div>
+    
+    <div class="ai-chat-controls">
+      <select class="ai-provider-select">
+        <option value="auto">Auto (Default)</option>
+        <option value="custom">Custom AI (Local)</option>
+        <option value="groq">Groq (Ultra-Fast)</option>
+        <option value="gemini">Gemini (Advanced)</option>
+        <option value="compare">Compare All 3 AIs</option>
+      </select>
+    </div>
+
+    <div class="ai-chat-input-area">
+      <textarea class="ai-chat-input" rows="2" placeholder="Ask about meals, workouts, or nutrition..."></textarea>
+      <button class="ai-chat-send-btn">Send</button>
+    </div>
+  </div>
+
+  <script src="ai-chat.js"></script>
+</body>
+</html>

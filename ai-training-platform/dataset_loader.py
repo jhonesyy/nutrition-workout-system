@@ -1,104 +1,198 @@
+
 """
-Load datasets from CSV, JSON, JSONL, TXT and convert them into a unified format.
+Dataset loader for Nutrition and Workout AI.
+
+Supported:
+- CSV
+- TSV
+- JSON
+- JSONL
+- TXT
+
+Normalized output:
+- text
+- prompt
+- completion
 """
 
 import json
 import logging
+
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
 import pandas as pd
-from datasets import Dataset, DatasetDict, load_dataset
+
+from datasets import Dataset, DatasetDict
+
 
 logger = logging.getLogger(__name__)
 
 
-SUPPORTED_EXTENSIONS = {".csv", ".json", ".jsonl", ".txt", ".tsv"}
+SUPPORTED_EXTENSIONS = {
+    ".csv",
+    ".tsv",
+    ".json",
+    ".jsonl",
+    ".txt",
+}
 
 
-def load_raw_file(file_path: Union[str, Path]) -> List[Dict]:
-    """Load a single file into a list of dictionaries."""
+PROMPT_PAIRS = [
+    ("prompt", "completion"),
+    ("instruction", "output"),
+    ("question", "answer"),
+    ("input", "output"),
+    ("instruction", "response"),
+    ("query", "response"),
+]
+
+
+def load_raw_file(
+    file_path: Union[str, Path]
+) -> List[Dict]:
+
     path = Path(file_path)
+
     if not path.exists():
-        raise FileNotFoundError(f"Dataset file not found: {path}")
+        raise FileNotFoundError(
+            f"Dataset not found: {path}"
+        )
 
     suffix = path.suffix.lower()
-    logger.info(f"Loading dataset from {path} ({suffix})")
 
-    if suffix == ".csv" or suffix == ".tsv":
-        sep = "\t" if suffix == ".tsv" else ","
-        df = pd.read_csv(path, sep=sep)
+    logger.info("Loading dataset: %s", path)
+
+    if suffix in {".csv", ".tsv"}:
+
+        separator = "\t" if suffix == ".tsv" else ","
+
+        df = pd.read_csv(
+            path,
+            sep=separator,
+            encoding="utf-8-sig",
+        )
+
+        df = df.where(pd.notna(df), None)
+
         records = df.to_dict(orient="records")
 
     elif suffix == ".json":
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+
+        with open(path, encoding="utf-8") as file:
+            data = json.load(file)
+
         if isinstance(data, list):
             records = data
-        elif isinstance(data, dict) and "data" in data:
+
+        elif isinstance(data, dict) and isinstance(data.get("data"), list):
             records = data["data"]
+
         else:
             records = [data]
 
     elif suffix == ".jsonl":
+
         records = []
-        with open(path, "r", encoding="utf-8") as f:
-            for line_num, line in enumerate(f, 1):
+
+        with open(path, encoding="utf-8") as file:
+
+            for line_number, line in enumerate(file, 1):
+
                 line = line.strip()
+
                 if not line:
                     continue
+
                 try:
-                    records.append(json.loads(line))
-                except json.JSONDecodeError as e:
-                    logger.warning(f"Skipping invalid JSONL line {line_num}: {e}")
+                    record = json.loads(line)
+
+                    if isinstance(record, dict):
+                        records.append(record)
+
+                except json.JSONDecodeError as error:
+
+                    logger.warning(
+                        "Skipping invalid JSONL line %s: %s",
+                        line_number,
+                        error,
+                    )
 
     elif suffix == ".txt":
+
         records = []
-        with open(path, "r", encoding="utf-8") as f:
-            for i, line in enumerate(f):
+
+        with open(path, encoding="utf-8") as file:
+
+            for index, line in enumerate(file):
+
                 text = line.strip()
+
                 if text:
-                    records.append({"text": text, "id": i})
+                    records.append({
+                        "text": text,
+                        "id": index,
+                    })
 
     else:
-        raise ValueError(f"Unsupported file format: {suffix}. Supported: {SUPPORTED_EXTENSIONS}")
 
-    logger.info(f"Loaded {len(records)} raw records")
+        raise ValueError(
+            f"Unsupported file format: {suffix}"
+        )
+
+    if not records:
+        raise ValueError("Dataset contains no valid records.")
+
+    logger.info("Loaded %s records.", len(records))
+
     return records
 
 
-def detect_columns(records: List[Dict]) -> Dict[str, str]:
-    """Heuristically detect text / prompt / completion columns."""
-    if not records:
-        raise ValueError("Empty dataset")
+def detect_columns(
+    records: List[Dict]
+) -> Dict[str, str]:
 
-    sample = records[0]
-    keys = set(sample.keys())
+    if not records:
+        raise ValueError("Cannot detect columns from empty dataset.")
+
+    # Inspect multiple records rather than only the first.
+    available_keys = set()
+
+    for record in records[:100]:
+        available_keys.update(record.keys())
 
     mapping = {}
 
-    # Common patterns
-    if "text" in keys:
-        mapping["text"] = "text"
-    elif "content" in keys:
-        mapping["text"] = "content"
-    elif "body" in keys:
-        mapping["text"] = "body"
+    for prompt_key, completion_key in PROMPT_PAIRS:
 
-    if "prompt" in keys and "completion" in keys:
-        mapping["prompt"] = "prompt"
-        mapping["completion"] = "completion"
-    elif "instruction" in keys and "output" in keys:
-        mapping["prompt"] = "instruction"
-        mapping["completion"] = "output"
-    elif "question" in keys and "answer" in keys:
-        mapping["prompt"] = "question"
-        mapping["completion"] = "answer"
-    elif "input" in keys and "output" in keys:
-        mapping["prompt"] = "input"
-        mapping["completion"] = "output"
+        if (
+            prompt_key in available_keys
+            and completion_key in available_keys
+        ):
+
+            mapping["prompt"] = prompt_key
+            mapping["completion"] = completion_key
+
+            return mapping
+
+    for key in ["text", "content", "body"]:
+
+        if key in available_keys:
+            mapping["text"] = key
+            return mapping
 
     return mapping
+
+
+def is_valid_value(value) -> bool:
+
+    if value is None:
+        return False
+
+    if isinstance(value, float) and pd.isna(value):
+        return False
+
+    return bool(str(value).strip())
 
 
 def load_and_normalize(
@@ -107,95 +201,163 @@ def load_and_normalize(
     prompt_column: Optional[str] = None,
     completion_column: Optional[str] = None,
 ) -> Dataset:
-    """
-    Load any supported file and return a Hugging Face Dataset
-    with standardized columns: 'text' (for causal LM) or 'prompt'+'completion'.
-    """
+
     records = load_raw_file(file_path)
 
-    if not records:
-        raise ValueError("No valid records found in the dataset")
+    detected = detect_columns(records)
 
-    # Auto-detect if user did not specify columns
-    if text_column is None and prompt_column is None:
-        detected = detect_columns(records)
-        text_column = detected.get("text")
+    if prompt_column is None:
         prompt_column = detected.get("prompt")
+
+    if completion_column is None:
         completion_column = detected.get("completion")
 
+    if text_column is None:
+        text_column = detected.get("text")
+
     normalized = []
-    for i, rec in enumerate(records):
-        item = {"id": rec.get("id", i)}
+
+    seen = set()
+
+    for index, record in enumerate(records):
+
+        if not isinstance(record, dict):
+            continue
+
+        item = {
+            "id": str(record.get("id", index))
+        }
 
         if prompt_column and completion_column:
-            prompt = str(rec.get(prompt_column, "")).strip()
-            completion = str(rec.get(completion_column, "")).strip()
-            if prompt and completion:
-                # Format commonly used for instruction tuning
-                item["text"] = f"### Instruction:\n{prompt}\n\n### Response:\n{completion}"
-                item["prompt"] = prompt
-                item["completion"] = completion
-                normalized.append(item)
+
+            prompt_value = record.get(prompt_column)
+            completion_value = record.get(completion_column)
+
+            if not (
+                is_valid_value(prompt_value)
+                and is_valid_value(completion_value)
+            ):
+                continue
+
+            prompt = str(prompt_value).strip()
+            completion = str(completion_value).strip()
+
+            text = (
+                "### Instruction:\n"
+                f"{prompt}\n\n"
+                "### Response:\n"
+                f"{completion}"
+            )
+
+            item.update({
+                "text": text,
+                "prompt": prompt,
+                "completion": completion,
+            })
+
         elif text_column:
-            text = str(rec.get(text_column, "")).strip()
-            if text:
-                item["text"] = text
-                normalized.append(item)
+
+            value = record.get(text_column)
+
+            if not is_valid_value(value):
+                continue
+
+            text = str(value).strip()
+
+            item["text"] = text
+
         else:
-            # Fallback: join all string values
-            parts = [str(v).strip() for v in rec.values() if isinstance(v, (str, int, float))]
-            text = " ".join(parts).strip()
-            if text:
-                item["text"] = text
-                normalized.append(item)
+
+            raise ValueError(
+                "Could not detect a valid text or instruction format. "
+                "Specify text_column, prompt_column and completion_column."
+            )
+
+        normalized_text = item["text"]
+
+        if normalized_text in seen:
+            continue
+
+        seen.add(normalized_text)
+
+        normalized.append(item)
 
     if not normalized:
-        raise ValueError("After normalization the dataset is empty. Check column names.")
+        raise ValueError(
+            "No usable records found after normalization."
+        )
 
-    logger.info(f"Normalized dataset size: {len(normalized)}")
+    logger.info(
+        "Normalized dataset: %s examples",
+        len(normalized),
+    )
+
     return Dataset.from_list(normalized)
 
 
 def create_dataset_dict(
     train_path: Union[str, Path],
-    validation_split: float = 0.1,
+    validation_split: float = 0.10,
     test_split: float = 0.05,
     seed: int = 42,
     **kwargs,
 ) -> DatasetDict:
-    """Load and automatically split into train / validation / test."""
-    full_ds = load_and_normalize(train_path, **kwargs)
 
-    # Remove exact duplicates (correct way)
-    df = full_ds.to_pandas()
-    df = df.drop_duplicates(subset=["text"])
-    full_ds = Dataset.from_pandas(df, preserve_index=False)
-    logger.info(f"After deduplication: {len(full_ds)} examples")
+    if not 0 <= validation_split < 1:
+        raise ValueError("Invalid validation split.")
 
-    # Split
-    test_size = test_split
-    val_size = validation_split / (1 - test_size) if test_size < 1 else 0
+    if not 0 <= test_split < 1:
+        raise ValueError("Invalid test split.")
 
-    split1 = full_ds.train_test_split(test_size=test_size, seed=seed)
-    train_val = split1["train"]
-    test_ds = split1["test"]
+    if validation_split + test_split >= 1:
+        raise ValueError("Combined validation and test splits must be below 1.")
 
-    if val_size > 0 and len(train_val) > 1:
-        split2 = train_val.train_test_split(test_size=val_size, seed=seed)
-        train_ds = split2["train"]
-        val_ds = split2["test"]
-    else:
-        train_ds = train_val
-        val_ds = Dataset.from_list([])
+    dataset = load_and_normalize(
+        train_path,
+        **kwargs,
+    )
 
-    ds_dict = DatasetDict({
+    if len(dataset) < 3:
+        raise ValueError(
+            "At least three unique examples are required for splitting."
+        )
+
+    logger.info(
+        "Splitting %s examples...",
+        len(dataset),
+    )
+
+    test_result = dataset.train_test_split(
+        test_size=test_split,
+        seed=seed,
+    )
+
+    train_val = test_result["train"]
+    test_ds = test_result["test"]
+
+    validation_fraction = (
+        validation_split / (1 - test_split)
+    )
+
+    validation_result = train_val.train_test_split(
+        test_size=validation_fraction,
+        seed=seed,
+    )
+
+    train_ds = validation_result["train"]
+    validation_ds = validation_result["test"]
+
+    result = DatasetDict({
         "train": train_ds,
-        "validation": val_ds,
+        "validation": validation_ds,
         "test": test_ds,
     })
 
     logger.info(
-        f"Splits → train: {len(train_ds)}, "
-        f"validation: {len(val_ds)}, test: {len(test_ds)}"
+        "Dataset split complete: train=%s validation=%s test=%s",
+        len(train_ds),
+        len(validation_ds),
+        len(test_ds),
     )
-    return ds_dict
+
+    return result

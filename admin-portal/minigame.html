@@ -86,7 +86,12 @@
   </div>
 
   <script>
-    const API = 'https://nutrition-workout-system-production.up.railway.app/api';
+    // SMART API SWITCHING
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const API_BASE = isLocalhost 
+      ? 'http://localhost:5000/api' 
+      : 'https://nutrition-workout-system-production.up.railway.app/api';
+
     const token = localStorage.getItem('token');
     const user = JSON.parse(localStorage.getItem('user') || 'null');
 
@@ -101,10 +106,7 @@
     });
 
     function authHeaders() {
-      return {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + token
-      };
+      return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
     }
 
     function showMsg(text, isError = false) {
@@ -135,7 +137,7 @@
     async function loadQuizzes() {
       const tbody = document.getElementById('quizTableBody');
       try {
-        const res = await fetch(API + '/minigame/admin/quizzes', { headers: authHeaders() });
+        const res = await fetch(API_BASE + '/minigame/admin/quizzes', { headers: authHeaders() });
         const data = await res.json();
         if (!res.ok) throw new Error(data.message || 'Failed to load');
 
@@ -193,7 +195,7 @@
       if (exerciseVal) payload.exercise_id = Number(exerciseVal);
 
       try {
-        const url = id ? `${API}/minigame/admin/quizzes/${id}` : `${API}/minigame/admin/quizzes`;
+        const url = id ? `${API_BASE}/minigame/admin/quizzes/${id}` : `${API_BASE}/minigame/admin/quizzes`;
         const method = id ? 'PUT' : 'POST';
         const res = await fetch(url, {
           method,
@@ -235,7 +237,7 @@
     window.deleteQuiz = async function (id) {
       if (!confirm('Delete this quiz?')) return;
       try {
-        const res = await fetch(`${API}/minigame/admin/quizzes/${id}`, {
+        const res = await fetch(`${API_BASE}/minigame/admin/quizzes/${id}`, {
           method: 'DELETE',
           headers: authHeaders()
         });

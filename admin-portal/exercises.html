@@ -81,13 +81,19 @@
   </div>
 
   <script>
-    const API = 'https://nutrition-workout-system-production.up.railway.app/api';
+    // SMART API SWITCHING
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const API_BASE = isLocalhost 
+      ? 'http://localhost:5000/api' 
+      : 'https://nutrition-workout-system-production.up.railway.app/api';
+
     const token = localStorage.getItem('token');
     const user = JSON.parse(localStorage.getItem('user') || 'null');
 
-    if (!token || !user || !['admin','super_admin','gym_manager'].includes(user.role)) {
+    if (!token || !user || !['admin', 'super_admin', 'gym_manager'].includes(user.role)) {
       window.location.href = 'index.html';
     }
+    
     document.getElementById('adminInfo').textContent = (user.full_name || user.email) + ' | ' + user.role;
 
     document.getElementById('logoutBtn').addEventListener('click', (e) => {
@@ -118,12 +124,12 @@
     async function loadExercises() {
       const tbody = document.getElementById('exerciseTableBody');
       try {
-        const res = await fetch(API + '/workouts/exercises', { headers: authHeaders() });
+        const res = await fetch(API_BASE + '/workouts/exercises', { headers: authHeaders() });
         const data = await res.json();
         if (!res.ok) throw new Error(data.message || 'Failed to load');
 
         const list = Array.isArray(data) ? data : (data.exercises || data);
-        if (!list.length) {
+        if (!list || !list.length) {
           tbody.innerHTML = '<tr><td colspan="6">No exercises found</td></tr>';
           return;
         }
@@ -136,7 +142,7 @@
             <td>${ex.equipment || '-'}</td>
             <td>${ex.difficulty || '-'}</td>
             <td>
-              <button class="btn" onclick='editExercise(${JSON.stringify(ex)})'>Edit</button>
+              <button class="btn" onclick='editExercise(${JSON.stringify(ex).replace(/'/g, "&apos;")})'>Edit</button>
               <button class="btn" onclick="deleteExercise(${ex.id})" style="margin-left:4px;color:#c62828;">Delete</button>
             </td>
           </tr>
@@ -159,7 +165,7 @@
       };
 
       try {
-        const url = id ? `${API}/workouts/exercises/${id}` : `${API}/workouts/exercises`;
+        const url = id ? `${API_BASE}/workouts/exercises/${id}` : `${API_BASE}/workouts/exercises`;
         const method = id ? 'PUT' : 'POST';
         const res = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(payload) });
         const data = await res.json();
@@ -191,7 +197,7 @@
     window.deleteExercise = async function(id) {
       if (!confirm('Delete this exercise?')) return;
       try {
-        const res = await fetch(`${API}/workouts/exercises/${id}`, {
+        const res = await fetch(`${API_BASE}/workouts/exercises/${id}`, {
           method: 'DELETE',
           headers: authHeaders()
         });

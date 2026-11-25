@@ -59,7 +59,12 @@
     </main>
   </div>
   <script>
-    const API = 'https://nutrition-workout-system-production.up.railway.app/api';
+    // SMART API SWITCHING
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const API_BASE = isLocalhost 
+      ? 'http://localhost:5000/api' 
+      : 'https://nutrition-workout-system-production.up.railway.app/api';
+
     const token = localStorage.getItem('token');
     const user = JSON.parse(localStorage.getItem('user') || 'null');
 
@@ -77,8 +82,8 @@
       const tbody = document.getElementById('mealsBody');
       try {
         const url = date
-          ? `${API}/meals/admin/logs?date=${date}`
-          : `${API}/meals/admin/logs?limit=50`;
+          ? `${API_BASE}/meals/admin/logs?date=${date}`
+          : `${API_BASE}/meals/admin/logs?limit=50`;
         const res = await fetch(url, {
           headers: { 'Authorization': 'Bearer ' + token }
         });

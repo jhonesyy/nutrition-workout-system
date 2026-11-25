@@ -1,7 +1,10 @@
+
 """
 Model loading, LoRA setup, and saving utilities.
+Supports pretrained models, LoRA adapters, and full fine-tuned models.
 """
 
+import json
 import logging
 from pathlib import Path
 from typing import Optional, Tuple
@@ -12,8 +15,15 @@ from transformers import (
     AutoTokenizer,
     PreTrainedModel,
     PreTrainedTokenizerBase,
+    AutoConfig,
 )
-from peft import LoraConfig, get_peft_model, PeftModel, TaskType
+from peft import (
+    LoraConfig,
+    get_peft_model,
+    PeftModel,
+    PeftConfig,
+    TaskType,
+)
 
 from config import TrainingConfig
 
@@ -21,25 +31,42 @@ logger = logging.getLogger(__name__)
 
 
 def get_device() -> torch.device:
+    """Detect available computing device."""
+
     if torch.cuda.is_available():
         device = torch.device("cuda")
-        logger.info(f"Using GPU: {torch.cuda.get_device_name(0)}")
+        logger.info(
+            "Using GPU: %s",
+            torch.cuda.get_device_name(0)
+        )
     else:
         device = torch.device("cpu")
         logger.info("Using CPU")
+
     return device
 
 
-def load_tokenizer(model_name_or_path: str) -> PreTrainedTokenizerBase:
+def load_tokenizer(
+    model_name_or_path: str
+) -> PreTrainedTokenizerBase:
+
     tokenizer = AutoTokenizer.from_pretrained(
         model_name_or_path,
         trust_remote_code=True,
         use_fast=True,
     )
+
     if tokenizer.pad_token is None:
+        if tokenizer.eos_token is None:
+            raise ValueError(
+                "Tokenizer has neither a padding token "
+                "nor an EOS token."
+            )
+
         tokenizer.pad_token = tokenizer.eos_token
-        tokenizer.pad_token_id = tokenizer.eos_token_id
+
     tokenizer.padding_side = "right"
+
     return tokenizer
 
 
@@ -48,35 +75,58 @@ def load_base_model(
     device: Optional[torch.device] = None,
 ) -> Tuple[PreTrainedModel, PreTrainedTokenizerBase]:
     """
-    Load either a pretrained model (for fine-tuning)
-    or a randomly initialized model (train from scratch).
+    Load pretrained model for training and optionally apply LoRA.
     """
+
     device = device or get_device()
-    tokenizer = load_tokenizer(config.model_name_or_path)
+
+    tokenizer = load_tokenizer(
+        config.model_name_or_path
+    )
 
     if config.train_from_scratch:
+
         logger.warning(
-            "TRAINING FROM SCRATCH selected. "
-            "This requires enormous data and compute. Prefer fine-tuning."
+            "Training from scratch selected."
         )
-        from transformers import AutoConfig
-        model_config = AutoConfig.from_pretrained(config.model_name_or_path)
-        model = AutoModelForCausalLM.from_config(model_config)
+
+        model_config = AutoConfig.from_pretrained(
+            config.model_name_or_path
+        )
+
+        model = AutoModelForCausalLM.from_config(
+            model_config
+        )
+
     else:
-        logger.info(f"Loading pretrained model: {config.model_name_or_path}")
+
+        logger.info(
+            "Loading pretrained model: %s",
+            config.model_name_or_path
+        )
+
         model = AutoModelForCausalLM.from_pretrained(
             config.model_name_or_path,
-            torch_dtype=torch.float16 if config.fp16 else torch.float32,
+            torch_dtype=(
+                torch.float16
+                if config.fp16 and device.type == "cuda"
+                else torch.float32
+            ),
             trust_remote_code=True,
-            device_map="auto" if torch.cuda.is_available() else None,
+            device_map=(
+                "auto"
+                if device.type == "cuda"
+                else None
+            ),
         )
 
     if config.gradient_checkpointing:
         model.gradient_checkpointing_enable()
 
-    # Apply LoRA if requested (only makes sense for fine-tuning)
     if config.use_lora and not config.train_from_scratch:
-        logger.info("Applying LoRA adapters...")
+
+        logger.info("Applying LoRA adapters.")
+
         lora_config = LoraConfig(
             r=config.lora_r,
             lora_alpha=config.lora_alpha,
@@ -85,10 +135,16 @@ def load_base_model(
             bias="none",
             task_type=TaskType.CAUSAL_LM,
         )
-        model = get_peft_model(model, lora_config)
+
+        model = get_peft_model(
+            model,
+            lora_config
+        )
+
         model.print_trainable_parameters()
 
     model.config.pad_token_id = tokenizer.pad_token_id
+
     return model, tokenizer
 
 
@@ -98,55 +154,134 @@ def save_model_and_tokenizer(
     output_dir: str,
     is_lora: bool = False,
 ):
+    """Save trained model, tokenizer, and metadata."""
+
     path = Path(output_dir)
     path.mkdir(parents=True, exist_ok=True)
 
-    logger.info(f"Saving model to {path}")
+    logger.info("Saving model to %s", path)
+
     model.save_pretrained(path)
     tokenizer.save_pretrained(path)
 
-    # Also save a small metadata file
-    meta = {
-        "is_lora": is_lora,
-        "base_model": getattr(model.config, "_name_or_path", "unknown"),
-    }
-    import json
-    with open(path / "training_meta.json", "w") as f:
-        json.dump(meta, f, indent=2)
+    if is_lora:
+        base_model_name = (
+            model.peft_config["default"].base_model_name_or_path
+        )
+    else:
+        base_model_name = getattr(
+            model.config,
+            "_name_or_path",
+            "unknown"
+        )
 
-    logger.info("Model and tokenizer saved successfully")
+    metadata = {
+        "is_lora": is_lora,
+        "base_model": base_model_name,
+    }
+
+    with open(
+        path / "training_meta.json",
+        "w",
+        encoding="utf-8"
+    ) as file:
+        json.dump(metadata, file, indent=2)
+
+    logger.info("Model saved successfully.")
 
 
 def load_trained_model(
     model_dir: str,
     device: Optional[torch.device] = None,
 ) -> Tuple[PreTrainedModel, PreTrainedTokenizerBase]:
-    """Load a previously fine-tuned model (supports both full and LoRA)."""
+    """
+    Load either a LoRA adapter or a complete fine-tuned model.
+
+    LoRA loading errors are deliberately raised instead of silently
+    attempting to load an adapter as a complete model.
+    """
+
     device = device or get_device()
     path = Path(model_dir)
 
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Model directory does not exist: {path}"
+        )
+
     tokenizer = load_tokenizer(str(path))
 
-    # Try loading as PEFT/LoRA first
-    try:
-        from peft import PeftConfig
-        peft_config = PeftConfig.from_pretrained(path)
+    adapter_config_path = path / "adapter_config.json"
+
+    if adapter_config_path.exists():
+
+        logger.info("LoRA adapter detected.")
+
+        peft_config = PeftConfig.from_pretrained(
+            str(path)
+        )
+
+        base_model_name = (
+            peft_config.base_model_name_or_path
+        )
+
+        if not base_model_name:
+            raise ValueError(
+                "LoRA adapter does not specify its base model."
+            )
+
+        logger.info(
+            "Loading original base model: %s",
+            base_model_name
+        )
+
         base_model = AutoModelForCausalLM.from_pretrained(
-            peft_config.base_model_name_or_path,
-            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-            device_map="auto" if torch.cuda.is_available() else None,
+            base_model_name,
+            torch_dtype=(
+                torch.float16
+                if device.type == "cuda"
+                else torch.float32
+            ),
+            device_map=(
+                "auto"
+                if device.type == "cuda"
+                else None
+            ),
             trust_remote_code=True,
         )
-        model = PeftModel.from_pretrained(base_model, path)
-        logger.info(f"Loaded LoRA model from {path}")
-    except Exception:
+
+        model = PeftModel.from_pretrained(
+            base_model,
+            str(path),
+            is_trainable=False,
+        )
+
+        logger.info("LoRA adapter loaded successfully.")
+
+    else:
+
+        logger.info("Loading full fine-tuned model.")
+
         model = AutoModelForCausalLM.from_pretrained(
-            path,
-            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-            device_map="auto" if torch.cuda.is_available() else None,
+            str(path),
+            torch_dtype=(
+                torch.float16
+                if device.type == "cuda"
+                else torch.float32
+            ),
+            device_map=(
+                "auto"
+                if device.type == "cuda"
+                else None
+            ),
             trust_remote_code=True,
         )
-        logger.info(f"Loaded full model from {path}")
 
     model.eval()
+
+    if tokenizer.pad_token_id is not None:
+        model.config.pad_token_id = tokenizer.pad_token_id
+
+    logger.info("Model loading completed.")
+
     return model, tokenizer

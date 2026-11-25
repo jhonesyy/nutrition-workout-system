@@ -34,22 +34,24 @@
         <div class="admin-info" id="adminInfo">Admin</div>
       </header>
 
+      <!-- UPDATED: Create User Account Form -->
       <section class="content-card">
-        <h2>Create Staff Account</h2>
-        <form id="staffForm">
+        <h2>Create User Account</h2>
+        <form id="userForm">
           <div class="form-row">
-            <input type="text" id="staff_full_name" placeholder="Full name" required />
-            <input type="email" id="staff_email" placeholder="Email" required />
-            <input type="password" id="staff_password" placeholder="Password" required />
-            <select id="staff_role" required>
+            <input type="text" id="user_full_name" placeholder="Full name" required />
+            <input type="email" id="user_email" placeholder="Email" required />
+            <input type="password" id="user_password" placeholder="Password" required />
+            <select id="user_role" required>
               <option value="">Select role</option>
-              <option value="admin">Admin</option>
+              <option value="user">Normal User</option>
               <option value="gym_manager">Gym Manager</option>
+              <option value="admin">Admin</option>
             </select>
-            <button type="submit" class="btn btn-dark">Create</button>
+            <button type="submit" class="btn btn-dark">Create Account</button>
           </div>
         </form>
-        <p id="staffMsg" style="margin-top:8px;font-size:13px;"></p>
+        <p id="userMsg" style="margin-top:8px;font-size:13px;"></p>
       </section>
 
       <section class="content-card">
@@ -73,8 +75,13 @@
     </main>
   </div>
 
-  <script>
-    const API = 'https://nutrition-workout-system-production.up.railway.app/api';
+    <script>
+    // SMART API SWITCHING
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const API_BASE = isLocalhost 
+      ? 'http://localhost:5000/api' 
+      : 'https://nutrition-workout-system-production.up.railway.app/api';
+
     const token = localStorage.getItem('token');
     const user = JSON.parse(localStorage.getItem('user') || 'null');
 
@@ -96,7 +103,13 @@
     async function loadUsers() {
       const tbody = document.getElementById('usersTableBody');
       try {
-        const res = await fetch(API + '/users', { headers: authHeaders() });
+        const res = await fetch(API_BASE + '/users', { headers: authHeaders() });
+        
+        // Safety check for HTML responses
+        if (!res.headers.get('content-type')?.includes('application/json')) {
+          throw new Error('Backend returned HTML. Is the server running on port 5000?');
+        }
+
         const data = await res.json();
         if (!res.ok) throw new Error(data.message || 'Failed to load users');
 
@@ -123,6 +136,7 @@
           </tr>
         `).join('');
       } catch (err) {
+        console.error('Load users error:', err);
         tbody.innerHTML = `<tr><td colspan="6" style="color:#c62828;">${err.message}</td></tr>`;
       }
     }
@@ -130,7 +144,7 @@
     window.toggleStatus = async function(id, is_active) {
       if (!confirm(is_active ? 'Activate this user?' : 'Deactivate this user?')) return;
       try {
-        const res = await fetch(`${API}/users/${id}/status`, {
+        const res = await fetch(`${API_BASE}/users/${id}/status`, {
           method: 'PATCH',
           headers: authHeaders(),
           body: JSON.stringify({ is_active })
@@ -143,30 +157,45 @@
       }
     };
 
-    document.getElementById('staffForm').addEventListener('submit', async (e) => {
+    // UPDATED: Handle User Creation with Safety Checks
+    document.getElementById('userForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const msg = document.getElementById('staffMsg');
-      msg.textContent = '';
+      const msg = document.getElementById('userMsg');
+      msg.textContent = 'Creating account...';
+      msg.style.color = '#555';
+      
       try {
-        const res = await fetch(API + '/users/staff', {
+        // Use the known working endpoint for admin user creation
+        const res = await fetch(`${API_BASE}/users/staff`, {
           method: 'POST',
           headers: authHeaders(),
           body: JSON.stringify({
-            full_name: document.getElementById('staff_full_name').value.trim(),
-            email: document.getElementById('staff_email').value.trim(),
-            password: document.getElementById('staff_password').value,
-            role: document.getElementById('staff_role').value
+            full_name: document.getElementById('user_full_name').value.trim(),
+            email: document.getElementById('user_email').value.trim(),
+            password: document.getElementById('user_password').value,
+            role: document.getElementById('user_role').value
           })
         });
+
+        // SAFETY CHECK: Ensure the response is actually JSON
+        const contentType = res.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          const text = await res.text();
+          console.error('Received non-JSON response:', text.substring(0, 200));
+          throw new Error('Server returned an HTML page. Check if the backend is running and the URL is correct.');
+        }
+
         const data = await res.json();
-        if (!res.ok) throw new Error(data.message || 'Failed');
+        if (!res.ok) throw new Error(data.message || 'Failed to create user');
+        
         msg.style.color = '#2e7d32';
-        msg.textContent = 'Staff account created';
+        msg.textContent = 'User account created successfully!';
         e.target.reset();
-        loadUsers();
+        loadUsers(); // Refresh the table to show the new user
       } catch (err) {
         msg.style.color = '#c62828';
         msg.textContent = err.message;
+        console.error('Creation error:', err);
       }
     });
 
