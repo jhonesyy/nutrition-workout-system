@@ -9,8 +9,11 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
 const genAI = process.env.GEMINI_API_KEY ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY) : null;
 
-const PYTHON_AI_API_URL = process.env.PYTHON_AI_API_URL || 'http://localhost:8000';
-const DEFAULT_TIMEOUT_MS = 30000; // 30 seconds
+// Prefer IPv4 to avoid ::1 / ECONNREFUSED issues
+const PYTHON_AI_API_URL = (process.env.PYTHON_AI_API_URL || process.env.CUSTOM_AI_URL || 'http://127.0.0.1:8000').replace('localhost', '127.0.0.1');
+const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+const DEFAULT_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS) || 30000;
 
 // ============================================================
 // HELPER: Track Metrics
@@ -55,17 +58,38 @@ async function executeCustomAI(message, history, userContext) {
   try {
     const response = await axios.post(
       `${PYTHON_AI_API_URL}/api/ai/chat`,
-      { message, user_id: String(userContext.userId) || '1', conversation_history: history, user_context: userContext },
+      {
+        message,
+        user_id: String(userContext.userId || userContext.user_id || '1'),
+        conversation_history: history || [],
+        user_context: userContext || {}
+      },
       { timeout: DEFAULT_TIMEOUT_MS }
     );
+
     const responseTime = Date.now() - startTime;
-    await trackMetrics('custom', responseTime, response.data.success);
-    return { provider: 'custom', response: response.data.response, model: response.data.model_name || 'nutrition-workout-ai-lora', responseTimeMs: responseTime, success: true };
+    const ok = !!(response.data && (response.data.success !== false) && response.data.response);
+    await trackMetrics('custom', responseTime, ok);
+
+    if (!ok) {
+      return { provider: 'custom', success: false, error: response.data?.error || 'Custom AI returned empty response' };
+    }
+
+    return {
+      provider: 'custom',
+      response: response.data.response,
+      model: response.data.model_name || 'nutrition-workout-ai-lora',
+      responseTimeMs: responseTime,
+      success: true
+    };
   } catch (error) {
     const responseTime = Date.now() - startTime;
     await trackMetrics('custom', responseTime, false);
-    console.error(`[Custom AI Error]: ${error.message}`);
-    return { provider: 'custom', success: false, error: 'Custom AI service is unavailable or timed out.' };
+    const reason = error.code === 'ECONNREFUSED'
+      ? `Custom AI unreachable at ${PYTHON_AI_API_URL} (is the FastAPI service running?)`
+      : (error.message || 'Custom AI request failed');
+    console.error(`[Custom AI Error]: ${reason}`);
+    return { provider: 'custom', success: false, error: reason };
   }
 }
 
@@ -77,29 +101,41 @@ async function executeGroq(message, history, userContext) {
   if (!groq) return { provider: 'groq', success: false, error: 'Groq API key not configured.' };
 
   try {
+    const systemPrompt = 'You are an expert AI Nutrition and Workout Assistant. Provide safe, practical, concise advice. Never invent personal data that was not supplied.';
     const messages = [
-      { role: 'system', content: 'You are an expert AI Nutrition and Workout Assistant. Provide safe, practical, and concise advice.' },
-      ...history.map(h => ({ role: h.role === 'user' ? 'user' : 'assistant', content: h.content })),
+      { role: 'system', content: systemPrompt },
+      ...(history || []).map(h => ({ role: h.role === 'user' ? 'user' : 'assistant', content: h.content })),
       { role: 'user', content: message }
     ];
 
     const completion = await groq.chat.completions.create({
-      model: 'llama3-8b-8192', // Stable, universally available Groq model
+      model: GROQ_MODEL,
       messages,
       temperature: 0.7,
-      max_tokens: 512,
+      max_tokens: 1024,
     });
 
     const responseTime = Date.now() - startTime;
     const text = completion.choices?.[0]?.message?.content?.trim();
     await trackMetrics('groq', responseTime, !!text);
-    
-    return { provider: 'groq', response: text || 'Groq returned an empty response.', model: completion.model, responseTimeMs: responseTime, success: true };
+
+    if (!text) {
+      return { provider: 'groq', success: false, error: 'Groq returned an empty response.' };
+    }
+
+    return {
+      provider: 'groq',
+      response: text,
+      model: completion.model || GROQ_MODEL,
+      responseTimeMs: responseTime,
+      success: true
+    };
   } catch (error) {
     const responseTime = Date.now() - startTime;
     await trackMetrics('groq', responseTime, false);
-    console.error(`[Groq Error]: ${error.message}`);
-    return { provider: 'groq', success: false, error: 'Groq API request failed.' };
+    const msg = error?.error?.message || error.message || 'Groq API request failed';
+    console.error(`[Groq Error]: ${msg}`);
+    return { provider: 'groq', success: false, error: msg };
   }
 }
 
@@ -111,10 +147,13 @@ async function executeGemini(message, history, userContext) {
   if (!genAI) return { provider: 'gemini', success: false, error: 'Gemini API key not configured.' };
 
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
     const chat = model.startChat({
-      history: history.map(h => ({ role: h.role === 'user' ? 'user' : 'model', parts: [{ text: h.content }] })),
-      generationConfig: { temperature: 0.7, maxOutputTokens: 512 },
+      history: (history || []).map(h => ({
+        role: h.role === 'user' ? 'user' : 'model',
+        parts: [{ text: h.content }]
+      })),
+      generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
     });
 
     const result = await chat.sendMessage(message);
@@ -122,12 +161,23 @@ async function executeGemini(message, history, userContext) {
     const responseTime = Date.now() - startTime;
     await trackMetrics('gemini', responseTime, !!text);
 
-    return { provider: 'gemini', response: text || 'Gemini returned an empty response.', model: 'gemini-1.5-flash', responseTimeMs: responseTime, success: true };
+    if (!text) {
+      return { provider: 'gemini', success: false, error: 'Gemini returned an empty response.' };
+    }
+
+    return {
+      provider: 'gemini',
+      response: text,
+      model: GEMINI_MODEL,
+      responseTimeMs: responseTime,
+      success: true
+    };
   } catch (error) {
     const responseTime = Date.now() - startTime;
     await trackMetrics('gemini', responseTime, false);
-    console.error(`[Gemini Error]: ${error.message}`);
-    return { provider: 'gemini', success: false, error: 'Gemini API request failed.' };
+    const msg = error.message || 'Gemini API request failed';
+    console.error(`[Gemini Error]: ${msg}`);
+    return { provider: 'gemini', success: false, error: msg };
   }
 }
 
@@ -136,7 +186,10 @@ async function executeGemini(message, history, userContext) {
 // ============================================================
 async function routeAIRequest(requestedProvider, message, history, userContext) {
   const config = await getConfig();
-  const enabledProviders = config.enabled_providers ? config.enabled_providers.split(',') : ['custom', 'groq', 'gemini'];
+  const enabledProviders = (config.enabled_providers || 'custom,groq,gemini')
+    .split(',')
+    .map(p => p.trim())
+    .filter(Boolean);
   const defaultProvider = config.default_provider || 'custom';
 
   let targetProvider = requestedProvider;
@@ -144,49 +197,56 @@ async function routeAIRequest(requestedProvider, message, history, userContext) 
     targetProvider = defaultProvider;
   }
 
-  // Create an ordered list: try the target first, then fall back to the rest
+  // Ordered list: requested/default first, then the rest
   const providersToTry = [targetProvider, ...enabledProviders.filter(p => p !== targetProvider)];
+
+  console.log(`[AI] Trying providers in order: ${providersToTry.join(' → ')}`);
 
   for (const provider of providersToTry) {
     try {
       let result;
       switch (provider) {
         case 'custom': result = await executeCustomAI(message, history, userContext); break;
-        case 'groq': result = await executeGroq(message, history, userContext); break;
+        case 'groq':   result = await executeGroq(message, history, userContext); break;
         case 'gemini': result = await executeGemini(message, history, userContext); break;
-        default: continue;
+        default:
+          console.warn(`[AI Fallback] Unknown provider "${provider}", skipping`);
+          continue;
       }
 
-      // 🎉 If successful, return it immediately!
       if (result && result.success) {
+        console.log(`[AI] Success with provider: ${provider} (${result.model})`);
         return result;
       }
-      
-      // If it failed, log it and try the next provider in the list
-      console.warn(`[AI Fallback] ${provider} failed (${result.error}). Trying next provider...`);
+
+      console.warn(`[AI Fallback] ${provider} failed (${result?.error || 'unknown'}). Trying next…`);
     } catch (err) {
-      console.warn(`[AI Fallback] ${provider} threw an error:`, err.message);
+      console.warn(`[AI Fallback] ${provider} threw:`, err.message);
     }
   }
 
-  // If ALL providers failed
-  return { success: false, error: 'All AI providers are currently unavailable. Please try again later.' };
+  return {
+    success: false,
+    error: 'All AI providers are currently unavailable. Please try again later.'
+  };
 }
 
 // ============================================================
-// MULTI-AI COMPARISON (Unchanged)
+// MULTI-AI COMPARISON
 // ============================================================
 async function compareProviders(message, history, userContext) {
   const config = await getConfig();
-  const enabledProviders = config.enabled_providers ? config.enabled_providers.split(',') : ['custom', 'groq', 'gemini'];
+  const enabledProviders = (config.enabled_providers || 'custom,groq,gemini').split(',').map(p => p.trim());
 
   const promises = [];
   if (enabledProviders.includes('custom')) promises.push(executeCustomAI(message, history, userContext));
-  if (enabledProviders.includes('groq')) promises.push(executeGroq(message, history, userContext));
+  if (enabledProviders.includes('groq'))   promises.push(executeGroq(message, history, userContext));
   if (enabledProviders.includes('gemini')) promises.push(executeGemini(message, history, userContext));
 
   const results = await Promise.allSettled(promises);
-  return results.map((result) => result.status === 'fulfilled' ? result.value : { provider: 'unknown', success: false, error: result.reason?.message || 'Unknown error' });
+  return results.map((r) =>
+    r.status === 'fulfilled' ? r.value : { provider: 'unknown', success: false, error: r.reason?.message || 'Unknown error' }
+  );
 }
 
 // ============================================================
