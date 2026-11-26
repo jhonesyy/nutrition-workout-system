@@ -11,7 +11,7 @@ const genAI = process.env.GEMINI_API_KEY ? new GoogleGenerativeAI(process.env.GE
 
 // Prefer IPv4 to avoid ::1 / ECONNREFUSED issues
 const PYTHON_AI_API_URL = (process.env.PYTHON_AI_API_URL || process.env.CUSTOM_AI_URL || 'http://127.0.0.1:8000').replace('localhost', '127.0.0.1');
-const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
+const GROQ_MODEL = process.env.GROQ_MODEL || 'qwen/qwen3.8-27b';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 const DEFAULT_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS) || 30000;
 
@@ -48,6 +48,37 @@ async function getConfig() {
   } catch (err) {
     return { default_provider: 'custom', enabled_providers: 'custom,groq,gemini' };
   }
+}
+
+// ============================================================
+// PERSONA SYSTEM PROMPT (member profile injected)
+// ============================================================
+function buildPersonaSystemPrompt(userContext = {}) {
+  const ctx = userContext || {};
+  const lines = [
+    'You are the personal AI nutrition and workout assistant for this gym member (House of Strength GYM).',
+    'Speak as their coach who already knows their profile. Use the MEMBER PROFILE below when they ask about age, weight, height, goals, calories, allergens, etc.',
+    'Do not say you do not know their age/weight/goal if that value is present in the profile. Do not invent missing values.',
+    'Give safe, practical, concise advice. If a medical question is outside fitness/nutrition scope, recommend a professional.',
+    '',
+    'MEMBER PROFILE (source of truth for this chat):',
+    `- Age: ${ctx.age != null ? ctx.age : 'not set'}`,
+    `- Gender/sex: ${ctx.gender || 'not set'}`,
+    `- Height (cm): ${ctx.heightCm != null ? ctx.heightCm : 'not set'}`,
+    `- Weight (kg): ${ctx.weightKg != null ? ctx.weightKg : 'not set'}`,
+    `- Activity level: ${ctx.activityLevel || 'not set'}`,
+    `- Goal: ${ctx.goal || 'not set'}`,
+    `- Goal category: ${ctx.goalCategory || 'not set'}`,
+    `- Allergens: ${Array.isArray(ctx.allergens) && ctx.allergens.length ? ctx.allergens.join(', ') : (ctx.allergens || 'none listed')}`,
+    `- Experience: ${ctx.experienceLevel || 'not set'}`,
+    `- BMR: ${ctx.bmr != null ? ctx.bmr : 'not calculated'}`,
+    `- TDEE: ${ctx.tdee != null ? ctx.tdee : 'not calculated'}`,
+    `- Target calories: ${ctx.targetCalories != null ? ctx.targetCalories : 'not calculated'}`,
+    `- Protein (g): ${ctx.protein_g != null ? ctx.protein_g : 'not set'}`,
+    `- Carbs (g): ${ctx.carbs_g != null ? ctx.carbs_g : 'not set'}`,
+    `- Fat (g): ${ctx.fat_g != null ? ctx.fat_g : 'not set'}`,
+  ];
+  return lines.join('\n');
 }
 
 // ============================================================
@@ -101,7 +132,7 @@ async function executeGroq(message, history, userContext) {
   if (!groq) return { provider: 'groq', success: false, error: 'Groq API key not configured.' };
 
   try {
-    const systemPrompt = 'You are an expert AI Nutrition and Workout Assistant. Provide safe, practical, concise advice. Never invent personal data that was not supplied.';
+    const systemPrompt = buildPersonaSystemPrompt(userContext);
     const messages = [
       { role: 'system', content: systemPrompt },
       ...(history || []).map(h => ({ role: h.role === 'user' ? 'user' : 'assistant', content: h.content })),
@@ -147,7 +178,11 @@ async function executeGemini(message, history, userContext) {
   if (!genAI) return { provider: 'gemini', success: false, error: 'Gemini API key not configured.' };
 
   try {
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+    const systemPrompt = buildPersonaSystemPrompt(userContext);
+    const model = genAI.getGenerativeModel({
+      model: GEMINI_MODEL,
+      systemInstruction: systemPrompt,
+    });
     const chat = model.startChat({
       history: (history || []).map(h => ({
         role: h.role === 'user' ? 'user' : 'model',
@@ -197,7 +232,6 @@ async function routeAIRequest(requestedProvider, message, history, userContext) 
     targetProvider = defaultProvider;
   }
 
-  // Ordered list: requested/default first, then the rest
   const providersToTry = [targetProvider, ...enabledProviders.filter(p => p !== targetProvider)];
 
   console.log(`[AI] Trying providers in order: ${providersToTry.join(' → ')}`);

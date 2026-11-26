@@ -10,18 +10,19 @@ const pool = require('../config/db');
 const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
 const genAI = process.env.GEMINI_API_KEY ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY) : null;
 
-const GROQ_MODELS = ['qwen/qwen3.8-27b', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
-const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+// Prefer qwen first — gpt-oss models often fail strict JSON validation on free tier
+const GROQ_MODELS = ['qwen/qwen3.8-27b', 'openai/gpt-oss-20b', 'openai/gpt-oss-120b'];
+// Gemini 2.5 family is gone for new users
+const GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash-lite'];
 
 // ============================================================
 // CONSTANTS
 // ============================================================
-const DEFAULT_TIMEOUT_MS = 25000;
+const DEFAULT_TIMEOUT_MS = 30000;
 const MAX_FOOD_CANDIDATES = 120;
 const MAX_EXERCISE_CANDIDATES = 160;
-// FIX: cap how many candidates we send to the AI (keeps Groq under its TPM limit)
-const AI_FOOD_SEND_LIMIT = 40;
-const AI_EXERCISE_SEND_LIMIT = 40;
+const AI_FOOD_SEND_LIMIT = 25;
+const AI_EXERCISE_SEND_LIMIT = 25;
 
 // ============================================================
 // HELPERS
@@ -36,7 +37,6 @@ function normalizeArray(value) {
   return [];
 }
 
-// FIX: robust allergen parsing (array | "a,b" | '["a","b"]')
 function parseAllergenList(value) {
   let arr = [];
   if (Array.isArray(value)) {
@@ -85,7 +85,6 @@ function parseAIJson(text) {
   catch (e) { throw new Error(`AI returned invalid JSON: ${e.message}`); }
 }
 
-// FIX: Gemini rejects JSON-Schema fields like additionalProperties. Strip them.
 function sanitizeSchemaForGemini(schema) {
   if (Array.isArray(schema)) return schema.map(sanitizeSchemaForGemini);
   if (schema && typeof schema === 'object') {
@@ -97,6 +96,38 @@ function sanitizeSchemaForGemini(schema) {
     return out;
   }
   return schema;
+}
+
+function normalizeWorkoutPlanShape(raw) {
+  if (!raw || typeof raw !== 'object') return raw;
+  if (Array.isArray(raw.workouts)) return raw;
+
+  const altKeys = ['days', 'schedule', 'weeklyPlan', 'weekly_plan', 'plan', 'sessions', 'workoutDays', 'workout_days'];
+  for (const key of altKeys) {
+    if (Array.isArray(raw[key])) return { ...raw, workouts: raw[key] };
+  }
+
+  if (raw.data && typeof raw.data === 'object') {
+    const nested = normalizeWorkoutPlanShape(raw.data);
+    if (Array.isArray(nested.workouts)) return nested;
+  }
+  if (raw.result && typeof raw.result === 'object') {
+    const nested = normalizeWorkoutPlanShape(raw.result);
+    if (Array.isArray(nested.workouts)) return nested;
+  }
+  if (raw.workoutPlan && typeof raw.workoutPlan === 'object') {
+    const nested = normalizeWorkoutPlanShape(raw.workoutPlan);
+    if (Array.isArray(nested.workouts)) return nested;
+  }
+  if (raw.workout_plan && typeof raw.workout_plan === 'object') {
+    const nested = normalizeWorkoutPlanShape(raw.workout_plan);
+    if (Array.isArray(nested.workouts)) return nested;
+  }
+
+  if (Array.isArray(raw) && raw.length > 0 && (raw[0].day || raw[0].exercises || raw[0].name)) {
+    return { workouts: raw, focus: 'General Fitness', daysPerWeek: raw.length };
+  }
+  return raw;
 }
 
 // ============================================================
@@ -199,15 +230,16 @@ const WORKOUT_PLAN_SCHEMA = {
 async function generateWithAI(prompt, systemPrompt = null, options = {}) {
   const {
     temperature = 0.4,
-    maxTokens = 2048,
+    maxTokens = 800,
     timeoutMs = DEFAULT_TIMEOUT_MS,
     responseSchema = null,
-    schemaName = 'structured_response',
   } = options;
 
   const messages = [];
   if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
   messages.push({ role: 'user', content: prompt });
+
+  const errors = [];
 
   // 1. GROQ
   if (groq) {
@@ -217,24 +249,38 @@ async function generateWithAI(prompt, systemPrompt = null, options = {}) {
         const controller = new AbortController();
         timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-        const request = { model, messages, temperature, max_tokens: maxTokens };
-                if (responseSchema) {
+        const request = {
+          model,
+          messages,
+          temperature,
+          max_tokens: maxTokens,
+        };
+        if (responseSchema) {
           request.response_format = { type: 'json_object' };
         }
 
         const completion = await groq.chat.completions.create(request, { signal: controller.signal });
         const text = completion.choices?.[0]?.message?.content?.trim();
-        if (text) return { text, provider: 'groq', model };
+        if (text) {
+          console.log(`[AI] Groq ${model} returned ${text.length} chars`);
+          return { text, provider: 'groq', model };
+        }
         throw new Error('Empty Groq response');
       } catch (err) {
-        console.warn(`[Groq] ${model} failed:`, err.message);
+        const msg = err.message || String(err);
+        if (msg.includes('json_validate_failed') || msg.includes('rate_limit') || msg.includes('tokens')) {
+          console.log(`[Groq] ${model} skipped → trying next`);
+        } else {
+          console.warn(`[Groq] ${model} failed:`, msg);
+        }
+        errors.push(`groq/${model}: ${msg}`);
       } finally {
         if (timeout) clearTimeout(timeout);
       }
     }
   }
 
-  // 2. GEMINI FALLBACK (schema sanitized)
+  // 2. GEMINI
   if (genAI) {
     for (const modelName of GEMINI_MODELS) {
       try {
@@ -246,7 +292,7 @@ async function generateWithAI(prompt, systemPrompt = null, options = {}) {
             ...(responseSchema
               ? {
                   responseMimeType: 'application/json',
-                  responseSchema: sanitizeSchemaForGemini(responseSchema), // <-- FIX
+                  responseSchema: sanitizeSchemaForGemini(responseSchema),
                 }
               : {}),
           },
@@ -255,15 +301,20 @@ async function generateWithAI(prompt, systemPrompt = null, options = {}) {
         const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
         const result = await model.generateContent(fullPrompt);
         const text = result.response.text()?.trim();
-        if (text) return { text, provider: 'gemini', model: modelName };
+        if (text) {
+          console.log(`[AI] Gemini ${modelName} returned ${text.length} chars`);
+          return { text, provider: 'gemini', model: modelName };
+        }
         throw new Error('Empty Gemini response');
       } catch (err) {
-        console.warn(`[Gemini] ${modelName} failed:`, err.message);
+        const msg = err.message || String(err);
+        console.warn(`[Gemini] ${modelName} failed:`, msg);
+        errors.push(`gemini/${modelName}: ${msg}`);
       }
     }
   }
 
-  throw new Error('All AI providers failed (Groq + Gemini)');
+  throw new Error(`All AI providers failed (Groq + Gemini). Details: ${errors.join(' | ')}`);
 }
 
 // ============================================================
@@ -274,7 +325,6 @@ const ALLERGEN_KEYWORDS = {
   egg: ['egg', 'eggs', 'mayonnaise', 'mayo'],
   fish: ['fish', 'tuna', 'salmon', 'tilapia', 'bangus', 'milkfish', 'sardine', 'sardines', 'anchovy', 'anchovies', 'mackerel'],
   shellfish: ['shrimp', 'prawn', 'crab', 'lobster', 'clam', 'mussel', 'oyster', 'scallop', 'shellfish'],
-  // FIX: cover "seafood"/"seafoods" so shrimp/crab/fish are all removed
   seafood: ['shrimp', 'prawn', 'crab', 'lobster', 'clam', 'mussel', 'oyster', 'scallop', 'shellfish', 'fish', 'tuna', 'salmon', 'tilapia', 'bangus', 'milkfish', 'sardine', 'sardines', 'anchovy', 'anchovies', 'mackerel'],
   seafoods: ['shrimp', 'prawn', 'crab', 'lobster', 'clam', 'mussel', 'oyster', 'scallop', 'shellfish', 'fish', 'tuna', 'salmon', 'tilapia', 'bangus', 'milkfish', 'sardine', 'sardines', 'anchovy', 'anchovies', 'mackerel'],
   soy: ['soy', 'soya', 'tofu', 'tempeh', 'edamame', 'soybean'],
@@ -292,7 +342,6 @@ function foodMatchesAllergens(food, allergens) {
   const normalizedAllergens = allergens.map(normalizeAllergen).filter(Boolean);
   if (normalizedAllergens.length === 0) return false;
 
-  // FIX: handle allergen_tags stored as array OR comma-separated string
   let dbTags = [];
   if (Array.isArray(food.allergen_tags)) {
     dbTags = food.allergen_tags.map(normalizeAllergen).filter(Boolean);
@@ -316,7 +365,7 @@ function foodMatchesAllergens(food, allergens) {
 // FOOD CANDIDATES
 // ============================================================
 async function getFoodCandidates(userProfile) {
-  const allergens = parseAllergenList(userProfile.allergens); // FIX: robust parse
+  const allergens = parseAllergenList(userProfile.allergens);
   console.log('[MealPlan] Parsed user allergens =', allergens);
 
   const limit = clampNumber(userProfile.foodCandidateLimit, 30, MAX_FOOD_CANDIDATES, MAX_FOOD_CANDIDATES);
@@ -391,7 +440,7 @@ async function getExerciseCandidates(userProfile) {
 }
 
 // ============================================================
-// CANDIDATE SERIALIZATION (lean = fewer tokens for Groq)
+// CANDIDATE SERIALIZATION
 // ============================================================
 function serializeFoodCandidates(foods) {
   return foods.map((food) => ({
@@ -418,17 +467,17 @@ function serializeExerciseCandidates(exercises) {
 }
 
 // ============================================================
-// MEAL NUTRITION CALCULATION
+// MEAL NUTRITION
 // ============================================================
 function calculateFoodNutrition(food, portionGrams) {
   const grams = clampNumber(portionGrams, 1, 1000, 100);
-  const m = grams / 100;
+  const factor = grams / 100;
   return {
-    calories: roundNumber(safeNumber(food.calories) * m),
-    protein_g: roundNumber(safeNumber(food.protein_g) * m),
-    carbs_g: roundNumber(safeNumber(food.carbs_g) * m),
-    fat_g: roundNumber(safeNumber(food.fat_g) * m),
-    fiber_g: roundNumber(safeNumber(food.fiber_g) * m),
+    calories: roundNumber(safeNumber(food.calories) * factor),
+    protein_g: roundNumber(safeNumber(food.protein_g) * factor),
+    carbs_g: roundNumber(safeNumber(food.carbs_g) * factor),
+    fat_g: roundNumber(safeNumber(food.fat_g) * factor),
+    fiber_g: roundNumber(safeNumber(food.fiber_g) * factor),
   };
 }
 
@@ -440,35 +489,28 @@ function validateMealPlan(rawPlan, foodCandidates, userProfile) {
   if (!Array.isArray(rawPlan.meals)) throw new Error('AI meal plan has no meals array');
 
   const foodMap = new Map(foodCandidates.map((f) => [Number(f.id), f]));
-  const allergens = parseAllergenList(userProfile.allergens);
 
   const meals = rawPlan.meals.map((meal, mealIndex) => {
     if (!meal || !Array.isArray(meal.items)) throw new Error(`Meal ${mealIndex + 1} has invalid items`);
 
-    const validatedItems = meal.items.map((item) => {
+    const items = meal.items.map((item) => {
       const foodId = Number(item.foodId);
       const food = foodMap.get(foodId);
       if (!food) throw new Error(`AI selected food ID ${foodId}, but that food is not an allowed candidate`);
-      if (foodMatchesAllergens(food, allergens)) throw new Error(`AI selected allergenic food: ${food.name}`);
 
-      const portionGrams = clampNumber(item.portion_g, 10, 1000, 100);
-      const nutrition = calculateFoodNutrition(food, portionGrams);
+      const portion_g = clampNumber(item.portion_g, 10, 800, 100);
+      const nutrition = calculateFoodNutrition(food, portion_g);
+
       return {
         foodId: food.id,
         name: food.name,
         brand: food.brand || null,
-        portion_g: portionGrams,
-        serving_size: food.serving_size || '100 g',
-        calories: nutrition.calories,
-        protein_g: nutrition.protein_g,
-        carbs_g: nutrition.carbs_g,
-        fat_g: nutrition.fat_g,
-        fiber_g: nutrition.fiber_g,
-        display: `${food.name} — ${portionGrams} g`,
+        portion_g,
+        ...nutrition,
       };
     });
 
-    const calculated = validatedItems.reduce(
+    const mealTotals = items.reduce(
       (t, i) => ({
         calories: t.calories + i.calories,
         protein_g: t.protein_g + i.protein_g,
@@ -482,13 +524,12 @@ function validateMealPlan(rawPlan, foodCandidates, userProfile) {
     return {
       name: meal.name || `Meal ${mealIndex + 1}`,
       time: meal.time || '',
-      items: validatedItems.map((i) => i.display),
-      foodItems: validatedItems,
-      calories: roundNumber(calculated.calories),
-      protein_g: roundNumber(calculated.protein_g),
-      carbs_g: roundNumber(calculated.carbs_g),
-      fat_g: roundNumber(calculated.fat_g),
-      fiber_g: roundNumber(calculated.fiber_g),
+      items,
+      calories: roundNumber(mealTotals.calories),
+      protein_g: roundNumber(mealTotals.protein_g),
+      carbs_g: roundNumber(mealTotals.carbs_g),
+      fat_g: roundNumber(mealTotals.fat_g),
+      fiber_g: roundNumber(mealTotals.fiber_g),
       notes: typeof meal.notes === 'string' ? meal.notes : '',
     };
   });
@@ -532,22 +573,34 @@ function validateMealPlan(rawPlan, foodCandidates, userProfile) {
 // ============================================================
 function validateWorkoutPlan(rawPlan, exerciseCandidates, userProfile) {
   if (!rawPlan || typeof rawPlan !== 'object') throw new Error('AI workout plan is not an object');
-  if (!Array.isArray(rawPlan.workouts)) throw new Error('AI workout plan has no workouts array');
+
+  const plan = normalizeWorkoutPlanShape(rawPlan);
+
+  if (!Array.isArray(plan.workouts)) {
+    console.error('[WorkoutPlan] Missing workouts array. Keys present:', Object.keys(plan || {}));
+    throw new Error('AI workout plan has no workouts array');
+  }
 
   const exerciseMap = new Map(exerciseCandidates.map((e) => [Number(e.id), e]));
 
-  const workouts = rawPlan.workouts.map((workout, workoutIndex) => {
-    if (!workout || !Array.isArray(workout.exercises)) throw new Error(`Workout ${workoutIndex + 1} has invalid exercises`);
+  const workouts = plan.workouts.map((workout, workoutIndex) => {
+    if (!workout || !Array.isArray(workout.exercises)) {
+      throw new Error(`Workout ${workoutIndex + 1} has invalid exercises`);
+    }
 
     const exercises = workout.exercises.map((item) => {
-      const exerciseId = Number(item.exerciseId);
+      const exerciseId = Number(item.exerciseId ?? item.id ?? item.exercise_id);
       const exercise = exerciseMap.get(exerciseId);
-      if (!exercise) throw new Error(`AI selected exercise ID ${exerciseId}, but that exercise is not an allowed candidate`);
+      if (!exercise) {
+        throw new Error(`AI selected exercise ID ${exerciseId}, but that exercise is not an allowed candidate`);
+      }
 
       const sets = clampNumber(item.sets, 1, 10, exercise.default_sets || 3);
-      const restSeconds = clampNumber(item.restSeconds, 15, 600, exercise.rest_seconds || 90);
+      const restSeconds = clampNumber(item.restSeconds ?? item.rest_seconds ?? item.rest, 15, 600, exercise.rest_seconds || 90);
       const reps = String(item.reps || exercise.default_reps || '8-12').slice(0, 50);
-      const formCues = Array.isArray(item.formCues) ? item.formCues.filter((c) => typeof c === 'string').slice(0, 6) : [];
+      let formCues = Array.isArray(item.formCues)
+        ? item.formCues.filter((c) => typeof c === 'string').slice(0, 6)
+        : (Array.isArray(item.form_cues) ? item.form_cues.filter((c) => typeof c === 'string').slice(0, 6) : []);
       if (formCues.length === 0 && exercise.form_tips) formCues.push(exercise.form_tips);
 
       return {
@@ -566,17 +619,26 @@ function validateWorkoutPlan(rawPlan, exerciseCandidates, userProfile) {
       };
     });
 
-    return { day: workout.day || `Day ${workoutIndex + 1}`, exercises };
+    return {
+      day: workout.day || workout.name || `Day ${workoutIndex + 1}`,
+      title: workout.title || workout.focus || workout.day || `Day ${workoutIndex + 1}`,
+      exercises,
+    };
   });
 
+  if (workouts.length === 0 || workouts.every((w) => w.exercises.length === 0)) {
+    throw new Error('AI workout plan contains no usable exercises');
+  }
+
   return {
-    focus: rawPlan.focus || userProfile.goal || 'General Fitness',
-    daysPerWeek: clampNumber(rawPlan.daysPerWeek, 1, 7, userProfile.daysPerWeek || 4),
-    sessionDurationMinutes: clampNumber(rawPlan.sessionDurationMinutes, 15, 180, 60),
+    focus: plan.focus || plan.goal || userProfile.goal || 'General Fitness',
+    title: plan.title || plan.focus || plan.goal || 'Personalized Workout Plan',
+    daysPerWeek: clampNumber(plan.daysPerWeek ?? plan.days_per_week, 1, 7, userProfile.daysPerWeek || 4),
+    sessionDurationMinutes: clampNumber(plan.sessionDurationMinutes ?? plan.session_duration_minutes, 15, 180, 60),
     workouts,
-    progressionNotes: rawPlan.progressionNotes || '',
-    warmup: Array.isArray(rawPlan.warmup) ? rawPlan.warmup.filter((i) => typeof i === 'string').slice(0, 10) : [],
-    cooldown: Array.isArray(rawPlan.cooldown) ? rawPlan.cooldown.filter((i) => typeof i === 'string').slice(0, 10) : [],
+    progressionNotes: plan.progressionNotes || plan.progression_notes || '',
+    warmup: Array.isArray(plan.warmup) ? plan.warmup.filter((i) => typeof i === 'string').slice(0, 10) : [],
+    cooldown: Array.isArray(plan.cooldown) ? plan.cooldown.filter((i) => typeof i === 'string').slice(0, 10) : [],
     validation: {
       source: 'postgresql',
       exerciseCandidates: exerciseCandidates.length,
@@ -587,55 +649,107 @@ function validateWorkoutPlan(rawPlan, exerciseCandidates, userProfile) {
 }
 
 // ============================================================
+// DETERMINISTIC FALLBACK WORKOUT PLAN
+// ============================================================
+function buildDeterministicWorkoutPlan(exerciseCandidates, userProfile) {
+  const daysPerWeek = clampNumber(userProfile.daysPerWeek, 1, 6, 4);
+  const goal = (userProfile.goal || 'General Fitness').toLowerCase();
+
+  const byMuscle = (keys) =>
+    exerciseCandidates.filter((e) => {
+      const mg = normalizeString(e.muscle_group);
+      return keys.some((k) => mg.includes(k));
+    });
+
+  const pushPool = byMuscle(['chest', 'shoulder', 'tricep', 'push']);
+  const pullPool = byMuscle(['back', 'bicep', 'pull', 'lat']);
+  const legPool = byMuscle(['leg', 'quad', 'hamstring', 'glute', 'calf']);
+  const corePool = byMuscle(['core', 'abs', 'oblique']);
+  const fullPool = exerciseCandidates;
+
+  const pick = (pool, n) => {
+    const src = pool.length ? pool : fullPool;
+    const out = [];
+    for (let i = 0; i < Math.min(n, src.length); i++) out.push(src[i % src.length]);
+    return out;
+  };
+
+  const dayTemplates = [
+    { day: 'Day 1 - Push', title: 'Push (Chest / Shoulders / Triceps)', pool: pushPool, count: 5 },
+    { day: 'Day 2 - Pull', title: 'Pull (Back / Biceps)', pool: pullPool, count: 5 },
+    { day: 'Day 3 - Legs', title: 'Legs & Glutes', pool: legPool, count: 5 },
+    { day: 'Day 4 - Upper / Full', title: 'Upper Body + Core', pool: [...pushPool, ...pullPool, ...corePool], count: 5 },
+    { day: 'Day 5 - Lower', title: 'Lower Body Focus', pool: legPool, count: 4 },
+    { day: 'Day 6 - Full Body', title: 'Full Body', pool: fullPool, count: 5 },
+  ];
+
+  const workouts = dayTemplates.slice(0, daysPerWeek).map((tpl) => {
+    const chosen = pick(tpl.pool, tpl.count);
+    const exercises = chosen.map((ex) => ({
+      exerciseId: ex.id,
+      name: ex.name,
+      muscleGroup: ex.muscle_group,
+      equipment: ex.equipment,
+      difficulty: ex.difficulty,
+      sets: clampNumber(ex.default_sets, 2, 5, 3),
+      reps: String(ex.default_reps || '8-12'),
+      restSeconds: clampNumber(ex.rest_seconds, 30, 180, 90),
+      formCues: ex.form_tips ? [ex.form_tips] : [],
+      notes: goal.includes('strength') ? 'Focus on progressive overload' : 'Control the tempo',
+      dbFormTips: ex.form_tips || null,
+      dbCommonErrors: ex.common_errors || null,
+    }));
+    return { day: tpl.day, title: tpl.title, exercises };
+  });
+
+  return {
+    focus: userProfile.goal || 'General Fitness',
+    title: `Deterministic ${userProfile.goal || 'Fitness'} Plan`,
+    daysPerWeek,
+    sessionDurationMinutes: 50,
+    workouts,
+    progressionNotes: 'Increase weight or reps when you can complete all sets with good form.',
+    warmup: ['5 min light cardio', 'Dynamic stretches', '2 light warm-up sets'],
+    cooldown: ['Static stretching 5-8 min', 'Deep breathing', 'Hydrate'],
+    validation: {
+      source: 'postgresql-deterministic',
+      exerciseCandidates: exerciseCandidates.length,
+      aiSelectedOnlyFromCandidates: true,
+      exerciseIdsValidated: true,
+      fallback: true,
+    },
+  };
+}
+
+// ============================================================
 // MEAL PLAN
 // ============================================================
 async function generateMealPlan(userProfile) {
   const foodCandidates = await getFoodCandidates(userProfile);
-  // FIX: cap + lean serialization to stay under Groq TPM
   const serializedFoods = serializeFoodCandidates(foodCandidates).slice(0, AI_FOOD_SEND_LIMIT);
 
-  const systemPrompt = `
-You are a practical sports nutritionist working with House of Strength GYM in the Philippines.
-Your job is to select foods ONLY from the supplied PostgreSQL candidate list.
-CRITICAL DATABASE RULE:
-- NEVER invent a food or a food ID.
-- Every meal item MUST reference one supplied food ID.
-- foodId is the source of truth. Portion is in grams.
-- Nutrition values are calculated by the application from PostgreSQL; do not override them.
-Nutrition planning:
-- Prefer affordable Filipino foods.
-- Respect the user's target calories/macros and allergen restrictions.
-- Use realistic portions. Create Breakfast, Lunch, Dinner, and 2 Snacks when possible.
-- Do not invent medical facts or diagnose disease.
-- Return only JSON matching the supplied schema.
-`;
+  const systemPrompt = `You are a practical sports nutritionist.
+Select foods ONLY from the supplied candidate list. Never invent food IDs.
+Return ONLY valid JSON matching the schema. No markdown.`;
 
-  // FIX: compact JSON (no pretty-print) to reduce tokens
-  const prompt = `
-Create a full-day personalized meal plan.
+  const prompt = `Create a personalized daily meal plan.
+
 USER PROFILE:
 ${JSON.stringify(userProfile)}
-ALLOWED FOOD CANDIDATES FROM POSTGRESQL:
+
+ALLOWED FOODS (use only these IDs):
 ${JSON.stringify(serializedFoods)}
-STRICT FOOD RULES:
-1. Only select food IDs from the ALLOWED FOOD CANDIDATES list.
-2. Every item must have foodId and portion_g.
-3. Never invent food IDs or use foods outside the list.
-4. Use 4-5 eating occasions (Breakfast, Lunch, Dinner, Snack, Snack).
-5. Keep portions realistic and respect allergens.
-6. Target calories: ${safeNumber(userProfile.targetCalories || userProfile.tdee)}
-7. Target protein: ${safeNumber(userProfile.protein_g)} g
-8. Target carbs: ${safeNumber(userProfile.carbs_g)} g
-9. Target fat: ${safeNumber(userProfile.fat_g)} g
-The application calculates nutrition from the database; only select foodId + portion_g.
-Return exactly the requested JSON structure.
-`;
+
+Rules:
+1. Only use foodId values from the list above.
+2. Every item needs foodId + portion_g.
+3. Hit target calories/macros as closely as possible.
+4. Return pure JSON with keys: dailySummary, meals, tips.`;
 
   const result = await generateWithAI(prompt, systemPrompt, {
-    temperature: 0.25,
-    maxTokens: 1500, // FIX: lower output budget
+    temperature: 0.3,
+    maxTokens: 800,
     responseSchema: MEAL_PLAN_SCHEMA,
-    schemaName: 'nutrition_meal_plan',
   });
 
   let plan;
@@ -659,58 +773,94 @@ async function generateWorkoutPlan(userProfile) {
   const exerciseCandidates = await getExerciseCandidates(userProfile);
   const serializedExercises = serializeExerciseCandidates(exerciseCandidates).slice(0, AI_EXERCISE_SEND_LIMIT);
 
-  const systemPrompt = `
-You are an experienced strength and conditioning coach.
-Your job is to select exercises ONLY from the supplied PostgreSQL candidate list.
-CRITICAL DATABASE RULE:
-- NEVER invent an exercise or an exercise ID.
-- Every workout exercise MUST reference a supplied exerciseId.
-- exerciseId is the source of truth.
-Training principles:
-- Match experience level, available equipment, days per week, and goal.
-- Use progressive overload, avoid excessive volume, give practical form cues.
-- Do not diagnose injuries or medical conditions.
-- Return only JSON matching the supplied schema.
-`;
+  const systemPrompt = `You are a strength coach. Return ONLY valid JSON.
+Top-level key MUST be "workouts" (array). Never invent exercise IDs.
+Example shape:
+{"focus":"...","daysPerWeek":4,"sessionDurationMinutes":55,"workouts":[{"day":"Monday","exercises":[{"exerciseId":12,"sets":3,"reps":"8-12","restSeconds":90,"formCues":["..."],"notes":"..."}]}],"progressionNotes":"...","warmup":["..."],"cooldown":["..."]}`;
 
-  const prompt = `
-Create a personalized workout plan.
+  const prompt = `Create a personalized workout plan.
+
 USER PROFILE:
 ${JSON.stringify(userProfile)}
-ALLOWED EXERCISES FROM POSTGRESQL:
-${JSON.stringify(serializedExercises)}
-STRICT EXERCISE RULES:
-1. Only select exercise IDs from the ALLOWED EXERCISES list.
-2. Every exercise must contain exerciseId, sets, reps, restSeconds, formCues, notes.
-3. Never invent exercise IDs or use exercises outside the list.
-4. Respect equipment, experience level, days per week, and session duration.
-USER GOAL: ${userProfile.goal || 'General Fitness'}
-EXPERIENCE: ${userProfile.experienceLevel || 'intermediate'}
-DAYS PER WEEK: ${userProfile.daysPerWeek || 4}
-AVAILABLE EQUIPMENT: ${JSON.stringify(userProfile.availableEquipment || [])}
-INJURIES / LIMITATIONS: ${JSON.stringify(userProfile.injuries || userProfile.limitations || [])}
-Return exactly the requested JSON structure.
-`;
 
-  const result = await generateWithAI(prompt, systemPrompt, {
-    temperature: 0.25,
-    maxTokens: 1500,
-    responseSchema: WORKOUT_PLAN_SCHEMA,
-    schemaName: 'personalized_workout_plan',
-  });
+ALLOWED EXERCISES (use only these IDs):
+${JSON.stringify(serializedExercises)}
+
+Rules:
+1. Only use exerciseId from the list.
+2. Top-level array key must be named "workouts".
+3. Return pure JSON only.`;
+
+  let result;
+  try {
+    result = await generateWithAI(prompt, systemPrompt, {
+      temperature: 0.2,
+      maxTokens: 800,
+      responseSchema: WORKOUT_PLAN_SCHEMA,
+    });
+  } catch (aiError) {
+    console.warn('[WorkoutPlan] All AI providers failed → deterministic fallback:', aiError.message);
+    const fallback = buildDeterministicWorkoutPlan(exerciseCandidates, userProfile);
+    return {
+      ...fallback,
+      meta: {
+        provider: 'deterministic',
+        model: 'rule-based',
+        candidateCount: exerciseCandidates.length,
+        databaseBacked: true,
+        fallback: true,
+        reason: aiError.message,
+      },
+    };
+  }
 
   let plan;
   try {
     plan = parseAIJson(result.text);
-  } catch (error) {
-    return { raw: result.text, meta: { provider: result.provider, model: result.model, parseError: true, error: error.message } };
+  } catch (parseError) {
+    console.warn('[WorkoutPlan] Parse failed → deterministic fallback');
+    const fallback = buildDeterministicWorkoutPlan(exerciseCandidates, userProfile);
+    return {
+      ...fallback,
+      meta: {
+        provider: result.provider,
+        model: result.model,
+        candidateCount: exerciseCandidates.length,
+        databaseBacked: true,
+        fallback: true,
+        parseError: true,
+        reason: parseError.message,
+      },
+    };
   }
 
-  const validated = validateWorkoutPlan(plan, exerciseCandidates, userProfile);
-  return {
-    ...validated,
-    meta: { provider: result.provider, model: result.model, candidateCount: exerciseCandidates.length, databaseBacked: true },
-  };
+  try {
+    const validated = validateWorkoutPlan(plan, exerciseCandidates, userProfile);
+    return {
+      ...validated,
+      meta: {
+        provider: result.provider,
+        model: result.model,
+        candidateCount: exerciseCandidates.length,
+        databaseBacked: true,
+        fallback: false,
+      },
+    };
+  } catch (validationError) {
+    console.warn('[WorkoutPlan] Validation failed → deterministic fallback:', validationError.message);
+    const fallback = buildDeterministicWorkoutPlan(exerciseCandidates, userProfile);
+    return {
+      ...fallback,
+      meta: {
+        provider: result.provider,
+        model: result.model,
+        candidateCount: exerciseCandidates.length,
+        databaseBacked: true,
+        fallback: true,
+        validationError: validationError.message,
+      },
+    };
+  }
 }
 
 // ============================================================

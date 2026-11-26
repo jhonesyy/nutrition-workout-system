@@ -165,7 +165,7 @@
       }
     }
 
-    async function askAIWorkoutPlan() {
+        async function askAIWorkoutPlan() {
       const box = document.getElementById('aiResultBox');
       const btn = document.getElementById('btnAskAI');
       box.innerHTML = '<p class="muted">Generating structured AI workout plan…</p>';
@@ -179,41 +179,82 @@
         const plan = res.data || {};
         lastAIWorkout = plan;
 
-        const exercises = Array.isArray(plan.exercises)
-          ? plan.exercises
-          : (Array.isArray(plan.days)
-            ? plan.days.flatMap(d => (d.exercises || []).map(e => ({ ...e, day: d.name || d.day })))
-            : []);
+        // Prefer the canonical backend shape: plan.workouts[{ day, exercises[] }]
+        // Also accept legacy shapes: plan.exercises (flat) or plan.days
+        let dayBlocks = [];
+        if (Array.isArray(plan.workouts) && plan.workouts.length) {
+          dayBlocks = plan.workouts.map((w) => ({
+            day: w.day || w.title || w.name || 'Day',
+            exercises: Array.isArray(w.exercises) ? w.exercises : [],
+          }));
+        } else if (Array.isArray(plan.days) && plan.days.length) {
+          dayBlocks = plan.days.map((d) => ({
+            day: d.name || d.day || d.title || 'Day',
+            exercises: Array.isArray(d.exercises) ? d.exercises : [],
+          }));
+        } else if (Array.isArray(plan.exercises) && plan.exercises.length) {
+          dayBlocks = [{ day: 'Workout', exercises: plan.exercises }];
+        }
+
+        const allExercises = dayBlocks.flatMap((d) =>
+          (d.exercises || []).map((e) => ({ ...e, day: d.day }))
+        );
+
+        const title = plan.title || plan.focus || plan.workout_name || plan.name || 'AI Workout Plan';
+        const metaLine = [
+          plan.focus ? `Focus: ${plan.focus}` : null,
+          plan.daysPerWeek ? `${plan.daysPerWeek} days/week` : null,
+          plan.sessionDurationMinutes ? `~${plan.sessionDurationMinutes} min/session` : null,
+          plan.meta && plan.meta.fallback ? '(rule-based fallback)' : null,
+        ].filter(Boolean).join(' · ');
 
         let html = `<div style="background:#121820;padding:12px;border-radius:8px;border:1px solid var(--border);margin-bottom:12px">
-          <strong>${plan.workout_name || plan.name || 'AI Workout Plan'}</strong>
-          ${plan.notes ? `<p class="muted" style="margin:6px 0 0">${plan.notes}</p>` : ''}
-          ${exercises.length ? `<button class="btn secondary" type="button" id="btnLogEntireWorkout" style="margin-top:10px">Log Entire Workout</button>` : ''}
+          <strong>${String(title).replace(/</g,'&lt;')}</strong>
+          ${metaLine ? `<p class="muted" style="margin:6px 0 0">${metaLine}</p>` : ''}
+          ${plan.progressionNotes ? `<p class="muted" style="margin:6px 0 0">${String(plan.progressionNotes).replace(/</g,'&lt;')}</p>` : ''}
+          ${allExercises.length ? `<button class="btn secondary" type="button" id="btnLogEntireWorkout" style="margin-top:10px">Log Entire Workout</button>` : ''}
         </div>`;
 
-        if (!exercises.length) {
+        if (Array.isArray(plan.warmup) && plan.warmup.length) {
+          html += `<div class="muted" style="margin-bottom:8px"><strong>Warm-up:</strong> ${plan.warmup.map(s => String(s).replace(/</g,'&lt;')).join(' · ')}</div>`;
+        }
+
+        if (!allExercises.length) {
           const text = plan.raw || plan.response || JSON.stringify(plan, null, 2);
           html += `<div style="white-space:pre-wrap">${String(text).replace(/</g,'&lt;')}</div>`;
         } else {
-          exercises.forEach((ex) => {
-            const name = ex.name || ex.exercise || 'Exercise';
-            const sets = ex.sets || ex.default_sets || 3;
-            const reps = ex.reps || ex.default_reps || '10';
-            const rest = ex.rest_seconds ? ` · rest ${ex.rest_seconds}s` : '';
-            const equip = ex.equipment ? ` · ${ex.equipment}` : '';
-            const muscle = ex.muscle_group ? ` · ${ex.muscle_group}` : '';
-            html += `<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px">
-              <strong>${name}</strong>
-              <span class="muted">${muscle}${equip}${rest}</span>
-              <div class="muted">${sets} × ${reps}</div>
-              <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
-                <button class="btn secondary btn-fill-logger" type="button"
-                  data-name="${String(name).replace(/"/g,'&quot;')}" data-sets="${sets}" data-reps="${String(reps).replace(/"/g,'&quot;')}">Add to Logger</button>
-                <button class="btn secondary btn-log-ex" type="button"
-                  data-name="${String(name).replace(/"/g,'&quot;')}" data-sets="${sets}" data-reps="${String(reps).replace(/"/g,'&quot;')}">Log Exercise</button>
-              </div>
-            </div>`;
+          dayBlocks.forEach((block) => {
+            if (!block.exercises || !block.exercises.length) return;
+            html += `<h4 style="margin:14px 0 8px;color:var(--text)">${String(block.day).replace(/</g,'&lt;')}</h4>`;
+            block.exercises.forEach((ex) => {
+              const name = ex.name || ex.exercise || 'Exercise';
+              const sets = ex.sets || ex.default_sets || 3;
+              const reps = ex.reps || ex.default_reps || '10';
+              const restSec = ex.restSeconds || ex.rest_seconds || null;
+              const rest = restSec ? ` · rest ${restSec}s` : '';
+              const equip = ex.equipment ? ` · ${ex.equipment}` : '';
+              const muscle = (ex.muscleGroup || ex.muscle_group) ? ` · ${ex.muscleGroup || ex.muscle_group}` : '';
+              const cues = Array.isArray(ex.formCues) && ex.formCues.length
+                ? `<div class="muted" style="font-size:0.9em;margin-top:4px">${ex.formCues.map(c => String(c).replace(/</g,'&lt;')).join(' · ')}</div>`
+                : '';
+              html += `<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px">
+                <strong>${String(name).replace(/</g,'&lt;')}</strong>
+                <span class="muted">${muscle}${equip}${rest}</span>
+                <div class="muted">${sets} × ${reps}</div>
+                ${cues}
+                <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+                  <button class="btn secondary btn-fill-logger" type="button"
+                    data-name="${String(name).replace(/"/g,'&quot;')}" data-sets="${sets}" data-reps="${String(reps).replace(/"/g,'&quot;')}">Add to Logger</button>
+                  <button class="btn secondary btn-log-ex" type="button"
+                    data-name="${String(name).replace(/"/g,'&quot;')}" data-sets="${sets}" data-reps="${String(reps).replace(/"/g,'&quot;')}">Log Exercise</button>
+                </div>
+              </div>`;
+            });
           });
+        }
+
+        if (Array.isArray(plan.cooldown) && plan.cooldown.length) {
+          html += `<div class="muted" style="margin-top:10px"><strong>Cool-down:</strong> ${plan.cooldown.map(s => String(s).replace(/</g,'&lt;')).join(' · ')}</div>`;
         }
 
         box.innerHTML = html;
@@ -233,15 +274,15 @@
         });
 
         const entire = document.getElementById('btnLogEntireWorkout');
-        if (entire && exercises.length) {
+        if (entire && allExercises.length) {
           entire.onclick = async () => {
             entire.disabled = true;
             entire.textContent = 'Logging all…';
             let ok = 0;
-            for (const ex of exercises) {
+            for (const ex of allExercises) {
               try {
                 await apiPost('/workouts/log', {
-                  exercise_id: null,
+                  exercise_id: ex.exerciseId || null,
                   exercise_name: ex.name || ex.exercise || 'Exercise',
                   sets_completed: Number(ex.sets || ex.default_sets) || 3,
                   reps_completed: String(ex.reps || ex.default_reps || '10'),

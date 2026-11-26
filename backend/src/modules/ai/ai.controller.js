@@ -103,7 +103,7 @@ exports.generateWorkoutPlan = async (req, res) => {
 };
 
 // ======================
-// POST /api/ai/chat (UPDATED FOR MULTI-AI)
+// POST /api/ai/chat (UPDATED FOR MULTI-AI + FULL PROFILE)
 // ======================
 exports.chatWithAI = async (req, res) => {
   try {
@@ -116,16 +116,32 @@ exports.chatWithAI = async (req, res) => {
 
     const conversationId = providedConvId || generateConversationId();
 
-    // 1. Get User Context
+    // 1. Get User Context (full profile so the personal AI knows the member)
     let userContext = { userId };
     try {
       const profile = await userService.getProfile(userId);
       if (profile) {
+        let calculations = null;
+        try { calculations = await userService.calculateTDEE(userId); } catch (_) {}
+        const calc = calculations?.calculations || {};
+        const macros = calculations?.macros || {};
         userContext = {
           ...userContext,
+          age: profile.age ?? null,
+          gender: profile.sex ?? null,
+          heightCm: profile.height_cm ?? null,
+          weightKg: profile.weight_kg ?? null,
+          activityLevel: profile.activity_factor ?? null,
           goal: profile.goal_type || 'general fitness',
+          goalCategory: profile.goal_category || null,
           allergens: profile.allergens || [],
           experienceLevel: 'intermediate',
+          tdee: calc.tdee ?? null,
+          bmr: calc.bmr ?? null,
+          targetCalories: calc.target_calories ?? calc.tdee ?? null,
+          protein_g: macros.protein_g ?? null,
+          carbs_g: macros.carbs_g ?? null,
+          fat_g: macros.fat_g ?? null,
         };
       }
     } catch (err) {
@@ -158,7 +174,7 @@ exports.chatWithAI = async (req, res) => {
       conversation_id: conversationId,
       response: aiResult.response,
       model: aiResult.model,
-      provider: aiResult.provider // Tells the frontend which AI actually answered
+      provider: aiResult.provider
     });
 
   } catch (error) {
@@ -200,17 +216,36 @@ exports.compareAI = async (req, res) => {
     try {
       const profile = await userService.getProfile(userId);
       if (profile) {
-        userContext = { ...userContext, goal: profile.goal_type || 'general fitness', allergens: profile.allergens || [] };
+        let calculations = null;
+        try { calculations = await userService.calculateTDEE(userId); } catch (_) {}
+        const calc = calculations?.calculations || {};
+        const macros = calculations?.macros || {};
+        userContext = {
+          ...userContext,
+          age: profile.age ?? null,
+          gender: profile.sex ?? null,
+          heightCm: profile.height_cm ?? null,
+          weightKg: profile.weight_kg ?? null,
+          activityLevel: profile.activity_factor ?? null,
+          goal: profile.goal_type || 'general fitness',
+          goalCategory: profile.goal_category || null,
+          allergens: profile.allergens || [],
+          experienceLevel: 'intermediate',
+          tdee: calc.tdee ?? null,
+          bmr: calc.bmr ?? null,
+          targetCalories: calc.target_calories ?? calc.tdee ?? null,
+          protein_g: macros.protein_g ?? null,
+          carbs_g: macros.carbs_g ?? null,
+          fat_g: macros.fat_g ?? null,
+        };
       }
     } catch (err) { console.warn('Failed to fetch user profile:', err.message); }
 
     const history = await getConversationHistory(userId, conversationId, 4);
     const formattedHistory = history.map(row => ({ role: row.role, content: row.message }));
 
-    // Fire to all enabled providers simultaneously
     const results = await aiOrchestrator.compareProviders(message.trim(), formattedHistory, userContext);
 
-    // Save the primary (first successful) response to keep the chat history flowing naturally
     const primaryResult = results.find(r => r.success);
     if (primaryResult) {
       await saveConversation(userId, conversationId, 'user', message.trim());
@@ -224,7 +259,7 @@ exports.compareAI = async (req, res) => {
     res.json({
       success: true,
       conversation_id: conversationId,
-      results: results // Array of { provider, response, model, responseTimeMs, success, error }
+      results: results
     });
 
   } catch (error) {
