@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Assistant | NutriFit Member</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="ai-chat.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <main class="main">
+      <div class="topbar">
+        <h1>AI Fitness Assistant</h1>
+        <div id="userChip" class="muted"></div>
+      </div>
+
+      <div class="card" style="padding:0; overflow:hidden;">
+        <div class="ai-chat-container" id="ai-chat-widget">
+          <div class="ai-chat-header">
+            <span> NutriFit AI Assistant + Coach Ian</span>
+            <button type="button" id="btnClearChat" style="background:none; border:none; color:white; cursor:pointer;">Clear</button>
+          </div>
+
+          <div class="ai-chat-messages">
+            <div class="ai-message assistant">Hello! Ask me about nutrition, workouts, macros, or fitness goals. I use your profile for personalized answers.</div>
+          </div>
+
+          <div class="ai-typing-indicator" style="display:none">AI is thinking...</div>
+          <div class="ai-error-message" style="display:none"></div>
+
+          <div class="ai-chat-controls">
+            <select class="ai-provider-select">
+              <option value="auto">Auto (best available)</option>
+              <option value="custom">Custom AI (Local)</option>
+              <option value="groq">Groq (Ultra-Fast)</option>
+              <option value="gemini">Gemini (Advanced)</option>
+              <option value="compare">Compare All 3 AIs</option>
+            </select>
+          </div>
+
+          <div class="ai-chat-input-area">
+            <textarea class="ai-chat-input" rows="2" placeholder="Ask about meals, workouts, or nutrition..."></textarea>
+            <button class="ai-chat-send-btn" type="button">Send</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="api.js"></script>
+  <script src="nav.js"></script>
+  <script src="ai-chat.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      bootShell('ai-chat.html');
+      const clearBtn = document.getElementById('btnClearChat');
+      if (clearBtn) clearBtn.onclick = () => location.reload();
+    });
+  </script>
+</body>
+</html>

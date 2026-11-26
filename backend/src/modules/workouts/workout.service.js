@@ -57,16 +57,32 @@ const deleteExercise = async (id) => {
 const logWorkout = async (userId, data) => {
   const { exercise_id, exercise_name, sets_completed, reps_completed, weight_kg, duration_minutes, notes, log_date } = data;
 
-  let name = exercise_name || null;
-  if (exercise_id && !name) {
-    const ex = await pool.query('SELECT name FROM exercises WHERE id = $1', [exercise_id]);
+  let name = (exercise_name || '').trim() || null;
+  let resolvedId = exercise_id ? Number(exercise_id) : null;
+  if (resolvedId && Number.isNaN(resolvedId)) resolvedId = null;
+
+  if (resolvedId && !name) {
+    const ex = await pool.query('SELECT name FROM exercises WHERE id = $1', [resolvedId]);
     name = ex.rows[0]?.name || null;
+  }
+
+  if (!resolvedId && !name) {
+    throw new Error('Either exercise_id or exercise_name is required');
+  }
+
+  const sets = sets_completed != null ? Number(sets_completed) : null;
+  if (sets != null && (Number.isNaN(sets) || sets < 0 || sets > 100)) {
+    throw new Error('sets_completed must be between 0 and 100');
+  }
+  const weight = weight_kg != null ? Number(weight_kg) : null;
+  if (weight != null && (Number.isNaN(weight) || weight < 0 || weight > 2000)) {
+    throw new Error('weight_kg must be between 0 and 2000');
   }
 
   const result = await pool.query(
     `INSERT INTO workout_logs (user_id, exercise_id, exercise_name, sets_completed, reps_completed, weight_kg, duration_minutes, notes, log_date)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9::date, CURRENT_DATE)) RETURNING *`,
-    [userId, exercise_id || null, name, sets_completed || null, reps_completed || null, weight_kg || null, duration_minutes || null, notes || null, log_date || null]
+    [userId, resolvedId, name, sets, reps_completed != null ? String(reps_completed) : null, weight, duration_minutes || null, notes || null, log_date || null]
   );
   return result.rows[0];
 };

@@ -82,7 +82,6 @@
       bootShell('nutrition.html');
       const $ = (id) => document.getElementById(id);
 
-      // ---------- SUMMARY ----------
       async function loadSummary() {
         try {
           const s = await apiGet('/meals/summary') || {};
@@ -94,7 +93,6 @@
         } catch (e) { $('summaryBox').textContent = e.message || 'Could not load summary'; }
       }
 
-      // ---------- MEALS ----------
       async function loadMeals() {
         const body = $('mealsBody');
         try {
@@ -117,7 +115,6 @@
         } catch (e) { body.innerHTML = `<tr><td colspan="4">${e.message}</td></tr>`; }
       }
 
-      // ---------- RECOMMENDATIONS (CORRECT ROUTE: /meals/recommend) ----------
       async function loadRecommend() {
         const box = $('recommendList');
         box.innerHTML = '<p class="muted">Loading…</p>';
@@ -125,9 +122,7 @@
           const data = await apiGet('/meals/recommend') || {};
           const groups = Array.isArray(data.recommendations) ? data.recommendations : [];
           const rem = data.remaining_macros || {};
-          
           if (!groups.length) { box.innerHTML = '<p class="muted">No recommendations yet. Complete your profile first.</p>'; return; }
-          
           let html = `<p class="muted" style="margin-bottom:10px">Remaining — <strong>${Math.round(rem.calories ?? 0)}</strong> kcal · P ${Math.round(rem.protein_g ?? 0)}g · C ${Math.round(rem.carbs_g ?? 0)}g · F ${Math.round(rem.fat_g ?? 0)}g</p>`;
           groups.forEach(g => {
             const foods = Array.isArray(g.foods) ? g.foods : [];
@@ -148,43 +143,149 @@
         }
       }
 
-      // ---------- AI MEAL PLAN (WITH DETAILED ERROR LOGGING) ----------
+      let lastAIPlan = null;
+
+      function mealTypeFromName(name) {
+        const n = (name || '').toLowerCase();
+        if (n.includes('breakfast')) return 'breakfast';
+        if (n.includes('lunch')) return 'lunch';
+        if (n.includes('dinner')) return 'dinner';
+        if (n.includes('snack') && n.includes('morning')) return 'morning_snack';
+        if (n.includes('snack')) return 'afternoon_snack';
+        return 'lunch';
+      }
+
+      function sumMacros(items) {
+        return (items || []).reduce((acc, i) => {
+          const p = Number(i.protein_g) || 0;
+          const c = Number(i.carbs_g) || 0;
+          const f = Number(i.fat_g) || 0;
+          const cal = Number(i.calories);
+          return {
+            calories: acc.calories + (Number.isFinite(cal) && cal >= 0 ? cal : Math.round(p * 4 + c * 4 + f * 9)),
+            protein_g: acc.protein_g + p,
+            carbs_g: acc.carbs_g + c,
+            fat_g: acc.fat_g + f
+          };
+        }, { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 });
+      }
+
+      async function logCustomMeal(payload, btnEl) {
+        if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Logging…'; }
+        try {
+          await apiPost('/meals', payload);
+          if (btnEl) { btnEl.textContent = '✓ Logged'; btnEl.classList.add('ok'); }
+          await Promise.all([loadMeals(), loadSummary(), loadRecommend()]);
+        } catch (err) {
+          if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Add to Meal Log'; }
+          alert('Failed to log meal: ' + (err.message || err));
+        }
+      }
+
       async function generateAIPlan() {
         const box = $('mealPlanResult');
         const btn = $('btnGenerateMealPlan');
         box.innerHTML = '<p class="muted">Generating… (may take 5-10 seconds)</p>';
         btn.disabled = true;
+        lastAIPlan = null;
 
         try {
           const res = await apiPost('/ai/meal-plan', {});
-          
-          // Check for backend success flag
           if (!res || !res.success) {
             throw new Error(res?.message || res?.error || 'Backend returned success: false');
           }
 
           const plan = res.data || {};
+          lastAIPlan = plan;
           const sum = plan.dailySummary || {};
-          
+
           let html = `<div style="background:#121820;padding:16px;border-radius:8px;border:1px solid var(--border);margin-bottom:16px">
             <h3 style="margin-top:0">Daily Summary</h3>
             <p class="muted">Target: ${sum.targetCalories || '—'} kcal · P ${sum.protein_g || '—'}g · C ${sum.carbs_g || '—'}g · F ${sum.fat_g || '—'}g</p>
             <p class="muted">Actual: ${sum.actualCalories || '—'} kcal · P ${sum.protein_g || '—'}g · C ${sum.carbs_g || '—'}g · F ${sum.fat_g || '—'}g</p>
+            <button class="btn secondary" type="button" id="btnLogEntirePlan" style="margin-top:10px">Add Entire Meal Plan to Log</button>
           </div>`;
-          
+
           if (Array.isArray(plan.meals)) {
-            plan.meals.forEach(m => {
-              html += `<div style="margin-bottom:16px"><h4 style="margin:0 0 8px">${m.name || 'Meal'} <span class="muted">(${m.calories || 0} kcal)</span></h4>
-                <ul style="margin:0;padding-left:20px">${(m.foodItems || []).map(i => `<li>${i.name} — ${i.portion_g}g (P:${i.protein_g}g, C:${i.carbs_g}g, F:${i.fat_g}g)</li>`).join('')}</ul>
-                ${m.notes ? `<p class="muted" style="margin:8px 0 0;font-style:italic">${m.notes}</p>` : ''}</div>`;
+            plan.meals.forEach((m, idx) => {
+              const items = m.foodItems || [];
+              const macros = sumMacros(items);
+              const mealCal = Number(m.calories) || macros.calories;
+              const mealPro = macros.protein_g;
+              const mealCarb = macros.carbs_g;
+              const mealFat = macros.fat_g;
+              const displayName = m.name || ('Meal ' + (idx + 1));
+              html += `<div style="margin-bottom:16px;border:1px solid var(--border);border-radius:8px;padding:12px" data-meal-idx="${idx}">
+                <h4 style="margin:0 0 8px">${displayName} <span class="muted">(${mealCal} kcal)</span></h4>
+                <ul style="margin:0;padding-left:20px">${items.map(i => `<li>${i.name} — ${i.portion_g || '—'}g (P:${i.protein_g || 0}g, C:${i.carbs_g || 0}g, F:${i.fat_g || 0}g)</li>`).join('')}</ul>
+                ${m.notes ? `<p class="muted" style="margin:8px 0 0;font-style:italic">${m.notes}</p>` : ''}
+                <button class="btn secondary btn-log-meal" type="button" style="margin-top:10px"
+                  data-idx="${idx}"
+                  data-name="${displayName.replace(/"/g, '&quot;')}"
+                  data-cal="${mealCal}" data-pro="${mealPro}" data-carb="${mealCarb}" data-fat="${mealFat}"
+                  data-type="${mealTypeFromName(displayName)}">Add to Meal Log</button>
+              </div>`;
             });
           }
-          
+
           if (Array.isArray(plan.tips) && plan.tips.length) {
             html += `<div style="margin-top:16px;padding:12px;background:#1e2836;border-radius:8px"><h4 style="margin:0 0 8px">Tips</h4><ul style="margin:0;padding-left:20px;color:var(--muted)">${plan.tips.map(t => `<li>${t}</li>`).join('')}</ul></div>`;
           }
-          
+
           box.innerHTML = html;
+
+          box.querySelectorAll('.btn-log-meal').forEach(b => {
+            b.onclick = () => {
+              const idx = Number(b.dataset.idx);
+              const meal = (lastAIPlan && lastAIPlan.meals) ? lastAIPlan.meals[idx] : null;
+              const payload = {
+                food_name: b.dataset.name,
+                meal_type: b.dataset.type,
+                quantity: 1,
+                calories: Number(b.dataset.cal) || 0,
+                protein_g: Number(b.dataset.pro) || 0,
+                carbs_g: Number(b.dataset.carb) || 0,
+                fat_g: Number(b.dataset.fat) || 0,
+                source: 'ai_generated',
+                notes: meal && meal.notes ? meal.notes : null,
+                custom_items: meal && meal.foodItems ? meal.foodItems : null
+              };
+              logCustomMeal(payload, b);
+            };
+          });
+
+          const entireBtn = $('btnLogEntirePlan');
+          if (entireBtn) {
+            entireBtn.onclick = async () => {
+              if (!lastAIPlan || !Array.isArray(lastAIPlan.meals) || !lastAIPlan.meals.length) return;
+              entireBtn.disabled = true;
+              entireBtn.textContent = 'Logging all…';
+              let ok = 0, fail = 0;
+              for (let i = 0; i < lastAIPlan.meals.length; i++) {
+                const m = lastAIPlan.meals[i];
+                const items = m.foodItems || [];
+                const macros = sumMacros(items);
+                const displayName = m.name || ('Meal ' + (i + 1));
+                try {
+                  await apiPost('/meals', {
+                    food_name: displayName,
+                    meal_type: mealTypeFromName(displayName),
+                    quantity: 1,
+                    calories: Number(m.calories) || macros.calories,
+                    protein_g: macros.protein_g,
+                    carbs_g: macros.carbs_g,
+                    fat_g: macros.fat_g,
+                    source: 'ai_generated',
+                    notes: m.notes || null,
+                    custom_items: items
+                  });
+                  ok++;
+                } catch (_) { fail++; }
+              }
+              entireBtn.textContent = fail ? `Logged ${ok}, ${fail} failed` : `✓ Logged ${ok} meals`;
+              await Promise.all([loadMeals(), loadSummary(), loadRecommend()]);
+            };
+          }
         } catch (err) {
           console.error('❌ AI Meal Plan Full Error:', err);
           box.innerHTML = `<p class="msg err">Failed: ${err.message}. <br><small>Check browser console (F12) for details.</small></p>`;
@@ -193,7 +294,6 @@
         }
       }
 
-      // ---------- LOG MEAL ----------
       $('logForm').onsubmit = async (e) => {
         e.preventDefault();
         const msg = $('logMsg');
@@ -210,11 +310,9 @@
         } catch (err) { msg.className = 'msg err'; msg.textContent = err.message; }
       };
 
-      // ---------- SAFE EVENT BINDING ----------
       const btnRec = $('btnRecommend'); if (btnRec) btnRec.onclick = loadRecommend;
       const btnPlan = $('btnGenerateMealPlan'); if (btnPlan) btnPlan.onclick = generateAIPlan;
 
-      // ---------- INIT ----------
       loadSummary();
       loadMeals();
       loadRecommend();

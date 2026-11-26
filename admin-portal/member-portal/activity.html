@@ -14,7 +14,6 @@
         <div id="userChip" class="muted">Member</div>
       </div>
 
-      <!-- 1. STATS GRID -->
       <div class="grid">
         <div class="card">
           <h3>Workouts This Week</h3>
@@ -26,7 +25,6 @@
         </div>
       </div>
 
-      <!-- 2. DATASET-DRIVEN RECOMMENDATIONS -->
       <div class="card">
         <h2>Recommended Workouts</h2>
         <p class="muted" id="recGoalLine">Based on your profile goal (dataset-driven).</p>
@@ -34,7 +32,6 @@
         <div id="recWorkoutList" style="margin-top:12px"></div>
       </div>
 
-      <!-- 3. AI CUSTOM PLAN GENERATOR -->
       <div class="card">
         <h2>AI Custom Workout Plan</h2>
         <p class="muted">Ask your trained AI to generate a tailored routine based on your specific goals.</p>
@@ -42,15 +39,14 @@
         <div id="aiResultBox" style="margin-top:12px"></div>
       </div>
 
-      <!-- 4. LOG WORKOUT FORM -->
       <div class="card">
         <h2>Log a Workout Set</h2>
         <form id="workoutLogForm">
-          <input type="hidden" id="log_exercise_id" required />
+          <input type="hidden" id="log_exercise_id" />
           <div class="form-row">
             <div>
               <label>Exercise</label>
-              <input type="text" id="log_exercise_name" readonly placeholder="Select from recommendations above" />
+              <input type="text" id="log_exercise_name" placeholder="Select from recommendations or AI plan, or type a custom name" />
             </div>
             <div>
               <label>Sets</label>
@@ -60,7 +56,7 @@
           <div class="form-row">
             <div>
               <label>Reps</label>
-              <input type="number" id="log_reps" min="1" value="10" />
+              <input type="text" id="log_reps" value="10" placeholder="e.g. 10 or 8-12" />
             </div>
             <div>
               <label>Weight (kg)</label>
@@ -72,7 +68,6 @@
         </form>
       </div>
 
-      <!-- 5. WORKOUT HISTORY -->
       <div class="card">
         <h2>Recent Workout History</h2>
         <table>
@@ -90,13 +85,11 @@
   <script>
     bootShell('activity.html');
 
-    // ---------- 1. STATS (Placeholder for now) ----------
     async function loadStats() {
       document.getElementById('statWeeklyWorkouts').textContent = '—';
       document.getElementById('statVolume').textContent = '—';
     }
 
-    // ---------- 2. DATASET RECOMMENDATIONS ----------
     async function loadWorkoutRecs() {
       const box = document.getElementById('recWorkoutList');
       box.innerHTML = '<p class="muted">Loading…</p>';
@@ -148,55 +141,156 @@
     }
     document.getElementById('btnRecWorkouts').onclick = loadWorkoutRecs;
 
-    // ---------- 3. AI CUSTOM PLAN ----------
+    let lastAIWorkout = null;
+
+    function fillLogger(name, sets, reps, exerciseId) {
+      document.getElementById('log_exercise_id').value = exerciseId || '';
+      document.getElementById('log_exercise_name').value = name || '';
+      document.getElementById('log_sets').value = sets || 3;
+      document.getElementById('log_reps').value = reps || 10;
+      document.getElementById('logMsg').className = 'msg';
+      document.getElementById('logMsg').textContent = 'Ready to log — adjust weight if needed, then Save.';
+      document.getElementById('workoutLogForm').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    async function logExerciseDirect(payload, btnEl) {
+      if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Logging…'; }
+      try {
+        await apiPost('/workouts/log', payload);
+        if (btnEl) { btnEl.textContent = '✓ Logged'; }
+        await loadHistory();
+      } catch (err) {
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Log Exercise'; }
+        alert('Failed to log: ' + (err.message || err));
+      }
+    }
+
     async function askAIWorkoutPlan() {
       const box = document.getElementById('aiResultBox');
-      box.innerHTML = '<p class="muted">Asking AI to generate a custom plan based on your profile...</p>';
+      const btn = document.getElementById('btnAskAI');
+      box.innerHTML = '<p class="muted">Generating structured AI workout plan…</p>';
+      btn.disabled = true;
+      lastAIWorkout = null;
       try {
-        const profile = await apiGet('/users/profile').catch(() => ({}));
-        const p = profile.profile || profile || {};
-        const goal = p.goal_type || 'general fitness';
-        
-        const prompt = `Create a concise, 3-day workout split for a user whose goal is "${goal}". Use practical advice. Format with clear bullet points.`;
-        
-        const res = await apiPost('/ai/chat', {
-          message: prompt,
-          user_id: String(getUser().id),
-          user_context: { goal: goal }
+        const res = await apiPost('/ai/workout-plan', {});
+        if (!res || !res.success) {
+          throw new Error(res?.message || res?.error || 'Failed to generate workout plan');
+        }
+        const plan = res.data || {};
+        lastAIWorkout = plan;
+
+        const exercises = Array.isArray(plan.exercises)
+          ? plan.exercises
+          : (Array.isArray(plan.days)
+            ? plan.days.flatMap(d => (d.exercises || []).map(e => ({ ...e, day: d.name || d.day })))
+            : []);
+
+        let html = `<div style="background:#121820;padding:12px;border-radius:8px;border:1px solid var(--border);margin-bottom:12px">
+          <strong>${plan.workout_name || plan.name || 'AI Workout Plan'}</strong>
+          ${plan.notes ? `<p class="muted" style="margin:6px 0 0">${plan.notes}</p>` : ''}
+          ${exercises.length ? `<button class="btn secondary" type="button" id="btnLogEntireWorkout" style="margin-top:10px">Log Entire Workout</button>` : ''}
+        </div>`;
+
+        if (!exercises.length) {
+          const text = plan.raw || plan.response || JSON.stringify(plan, null, 2);
+          html += `<div style="white-space:pre-wrap">${String(text).replace(/</g,'&lt;')}</div>`;
+        } else {
+          exercises.forEach((ex) => {
+            const name = ex.name || ex.exercise || 'Exercise';
+            const sets = ex.sets || ex.default_sets || 3;
+            const reps = ex.reps || ex.default_reps || '10';
+            const rest = ex.rest_seconds ? ` · rest ${ex.rest_seconds}s` : '';
+            const equip = ex.equipment ? ` · ${ex.equipment}` : '';
+            const muscle = ex.muscle_group ? ` · ${ex.muscle_group}` : '';
+            html += `<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px">
+              <strong>${name}</strong>
+              <span class="muted">${muscle}${equip}${rest}</span>
+              <div class="muted">${sets} × ${reps}</div>
+              <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+                <button class="btn secondary btn-fill-logger" type="button"
+                  data-name="${String(name).replace(/"/g,'&quot;')}" data-sets="${sets}" data-reps="${String(reps).replace(/"/g,'&quot;')}">Add to Logger</button>
+                <button class="btn secondary btn-log-ex" type="button"
+                  data-name="${String(name).replace(/"/g,'&quot;')}" data-sets="${sets}" data-reps="${String(reps).replace(/"/g,'&quot;')}">Log Exercise</button>
+              </div>
+            </div>`;
+          });
+        }
+
+        box.innerHTML = html;
+
+        box.querySelectorAll('.btn-fill-logger').forEach(b => {
+          b.onclick = () => fillLogger(b.dataset.name, b.dataset.sets, b.dataset.reps, null);
         });
-        
-        const text = res.response || (res.data && res.data.response) || 'No response generated.';
-        // Simple markdown-to-HTML conversion
-        const formatted = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
-        box.innerHTML = `<div style="background:#121820;padding:12px;border-radius:8px;border:1px solid var(--border)">${formatted}</div>`;
+        box.querySelectorAll('.btn-log-ex').forEach(b => {
+          b.onclick = () => logExerciseDirect({
+            exercise_id: null,
+            exercise_name: b.dataset.name,
+            sets_completed: Number(b.dataset.sets) || 3,
+            reps_completed: b.dataset.reps || '10',
+            weight_kg: 0,
+            notes: 'Logged from AI plan'
+          }, b);
+        });
+
+        const entire = document.getElementById('btnLogEntireWorkout');
+        if (entire && exercises.length) {
+          entire.onclick = async () => {
+            entire.disabled = true;
+            entire.textContent = 'Logging all…';
+            let ok = 0;
+            for (const ex of exercises) {
+              try {
+                await apiPost('/workouts/log', {
+                  exercise_id: null,
+                  exercise_name: ex.name || ex.exercise || 'Exercise',
+                  sets_completed: Number(ex.sets || ex.default_sets) || 3,
+                  reps_completed: String(ex.reps || ex.default_reps || '10'),
+                  weight_kg: 0,
+                  notes: 'Logged from AI plan'
+                });
+                ok++;
+              } catch (_) {}
+            }
+            entire.textContent = `✓ Logged ${ok} exercises`;
+            await loadHistory();
+          };
+        }
       } catch (e) {
-        console.error('AI error:', e);
+        console.error('AI workout error:', e);
         box.innerHTML = `<p class="msg err">${e.message}</p>`;
+      } finally {
+        btn.disabled = false;
       }
     }
     document.getElementById('btnAskAI').onclick = askAIWorkoutPlan;
 
-    // ---------- 4. LOG WORKOUT ----------
     document.getElementById('workoutLogForm').onsubmit = async (e) => {
       e.preventDefault();
       const msg = document.getElementById('logMsg');
       msg.className = 'msg'; msg.textContent = 'Saving…';
+      const idVal = document.getElementById('log_exercise_id').value;
+      const nameVal = (document.getElementById('log_exercise_name').value || '').trim();
+      if (!idVal && !nameVal) {
+        msg.className = 'msg err'; msg.textContent = 'Select or enter an exercise name.';
+        return;
+      }
       try {
         await apiPost('/workouts/log', {
-          exercise_id: Number(document.getElementById('log_exercise_id').value),
+          exercise_id: idVal ? Number(idVal) : null,
+          exercise_name: nameVal || null,
           sets_completed: Number(document.getElementById('log_sets').value) || 0,
-          reps_completed: Number(document.getElementById('log_reps').value) || 0,
+          reps_completed: document.getElementById('log_reps').value || '0',
           weight_kg: Number(document.getElementById('log_weight').value) || 0
         });
         msg.className = 'msg ok'; msg.textContent = 'Workout logged successfully!';
         document.getElementById('workoutLogForm').reset();
-        loadHistory(); // Refresh table
+        document.getElementById('log_exercise_id').value = '';
+        loadHistory();
       } catch (err) {
         msg.className = 'msg err'; msg.textContent = err.message;
       }
     };
 
-    // ---------- 5. HISTORY ----------
     async function loadHistory() {
       const body = document.getElementById('historyBody');
       try {
@@ -220,7 +314,6 @@
       }
     }
 
-    // Init
     loadStats();
     loadWorkoutRecs();
     loadHistory();

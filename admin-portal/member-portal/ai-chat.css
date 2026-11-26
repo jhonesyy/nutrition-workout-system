@@ -1,0 +1,78 @@
+/* Add to existing ai-chat.css */
+
+.ai-chat-controls {
+  padding: 10px 16px;
+  background: #f8f9fa;
+  border-top: 1px solid #e0e0e0;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.ai-provider-select {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 14px;
+  background: white;
+  cursor: pointer;
+  outline: none;
+}
+.ai-provider-select:focus { border-color: #007bff; }
+
+/* AI Response Badges */
+.ai-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #007bff;
+  background: #e7f1ff;
+  padding: 3px 8px;
+  border-radius: 12px;
+  display: inline-block;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ai-message.assistant .ai-badge {
+  background: #e7f1ff;
+  color: #0056b3;
+}
+
+/* Multi-AI Comparison Layout */
+.ai-comparison-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 10px 0;
+  padding: 15px;
+  background: #f1f3f5;
+  border-radius: 12px;
+  border: 1px dashed #adb5bd;
+}
+
+.comparison-header {
+  font-weight: 700;
+  color: #495057;
+  font-size: 14px;
+  text-align: center;
+  margin-bottom: 5px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.comparison-bubble {
+  max-width: 100% !important;
+  align-self: stretch !important;
+  background: white !important;
+  border-left: 4px solid #007bff;
+}
+
+.comparison-bubble.error {
+  border-left-color: #dc3545;
+  background: #fff5f5 !important;
+}
+
+.error-text {
+  color: #dc3545;
+  font-style: italic;
+}

@@ -12,7 +12,8 @@ const SALT_ROUNDS = 10;
 const SQL_FILES = [
   path.join(__dirname, '../sql/schema.sql'),
   path.join(__dirname, '../sql/gym_settings.sql'),
-  path.join(__dirname, '../sql/workout_logs.sql')
+  path.join(__dirname, '../sql/workout_logs.sql'),
+  path.join(__dirname, '../sql/meal_logs_custom_migration.sql')
 ];
 
 const initializeDatabase = async () => {

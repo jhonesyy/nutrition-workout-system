@@ -147,9 +147,9 @@ class AIChatAssistant {
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
   // Adjust this URL to match your backend in production
-  const BACKEND_URL = window.location.hostname === 'localhost' 
-    ? 'http://localhost:5000' 
-    : 'https://your-backend-url.com'; 
-    
+  const BACKEND_URL = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? 'http://localhost:5000'
+    : 'https://nutrition-workout-system-production.up.railway.app';
+
   window.aiChat = new AIChatAssistant('ai-chat-widget', BACKEND_URL);
 });
