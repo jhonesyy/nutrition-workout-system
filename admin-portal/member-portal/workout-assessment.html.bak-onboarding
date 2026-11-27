@@ -1,0 +1,306 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Workout Assessment | NutriFit Member</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .assessment-section { margin: 18px 0; }
+    .assessment-section h3 { margin-bottom: 10px; }
+    .choice-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 10px;
+    }
+    .choice {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    .choice input { width: auto; }
+    .assessment-status {
+      padding: 12px;
+      margin-bottom: 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    .assessment-status a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <div class="app" id="app">
+    <main class="main">
+      <div class="topbar">
+        <h1>Workout Assessment</h1>
+        <div id="userChip" class="muted">Member</div>
+      </div>
+
+      <div class="card">
+        <h2>Personal Training Assessment</h2>
+        <p class="muted">
+          Answer these questions so NutriFit can recommend workouts based on
+          your experience, schedule, equipment, activity level, and goals.
+        </p>
+
+        <div id="assessmentStatus" class="assessment-status">
+          Loading assessment...
+        </div>
+
+        <p class="msg">
+          Answer honestly. Do not attempt exercises that cause pain or
+          discomfort. This questionnaire is not a medical diagnosis.
+        </p>
+
+        <form id="assessmentForm">
+          <div class="assessment-section">
+            <h3>1. Training Experience</h3>
+            <label for="training_experience">Experience level</label>
+            <select id="training_experience" required>
+              <option value="">Select experience</option>
+              <option value="beginner">Beginner</option>
+              <option value="intermediate">Intermediate</option>
+              <option value="advanced">Advanced</option>
+            </select>
+
+            <label for="training_age_months">How many months have you trained?</label>
+            <input id="training_age_months" type="number" min="0" max="1200" required>
+          </div>
+
+          <div class="assessment-section">
+            <h3>2. Training Schedule</h3>
+            <label for="workout_days_per_week">How many days can you work out weekly?</label>
+            <select id="workout_days_per_week" required>
+              <option value="">Select days</option>
+              <option value="2">2 days</option>
+              <option value="3">3 days</option>
+              <option value="4">4 days</option>
+              <option value="5">5 days</option>
+              <option value="6">6 days</option>
+            </select>
+
+            <label for="session_duration_minutes">How long can each session be?</label>
+            <select id="session_duration_minutes" required>
+              <option value="">Select duration</option>
+              <option value="30">30 minutes</option>
+              <option value="45">45 minutes</option>
+              <option value="60">60 minutes</option>
+              <option value="90">90 minutes</option>
+              <option value="120">120 minutes</option>
+            </select>
+          </div>
+
+          <div class="assessment-section">
+            <h3>3. Available Equipment</h3>
+            <p class="muted">Select every option you can use.</p>
+            <div class="choice-grid" id="equipmentChoices">
+              <label class="choice"><input type="checkbox" name="equipment" value="bodyweight"> Bodyweight only</label>
+              <label class="choice"><input type="checkbox" name="equipment" value="dumbbells"> Dumbbells</label>
+              <label class="choice"><input type="checkbox" name="equipment" value="barbell"> Barbell</label>
+              <label class="choice"><input type="checkbox" name="equipment" value="machines"> Gym machines</label>
+              <label class="choice"><input type="checkbox" name="equipment" value="resistance_bands"> Resistance bands</label>
+              <label class="choice"><input type="checkbox" name="equipment" value="kettlebells"> Kettlebells</label>
+              <label class="choice"><input type="checkbox" name="equipment" value="full_gym"> Full gym access</label>
+            </div>
+          </div>
+
+          <div class="assessment-section">
+            <h3>4. Injury History</h3>
+            <label for="has_injuries">Do you currently have an injury or physical limitation?</label>
+            <select id="has_injuries" required>
+              <option value="">Select answer</option>
+              <option value="false">No</option>
+              <option value="true">Yes</option>
+            </select>
+
+            <div id="injuryDetailsSection" hidden>
+              <p class="muted">Select affected areas, if applicable.</p>
+              <div class="choice-grid">
+                <label class="choice"><input type="checkbox" name="injury" value="neck"> Neck</label>
+                <label class="choice"><input type="checkbox" name="injury" value="shoulders"> Shoulders</label>
+                <label class="choice"><input type="checkbox" name="injury" value="back"> Back</label>
+                <label class="choice"><input type="checkbox" name="injury" value="elbows"> Elbows</label>
+                <label class="choice"><input type="checkbox" name="injury" value="wrists"> Wrists</label>
+                <label class="choice"><input type="checkbox" name="injury" value="hips"> Hips</label>
+                <label class="choice"><input type="checkbox" name="injury" value="knees"> Knees</label>
+                <label class="choice"><input type="checkbox" name="injury" value="ankles"> Ankles</label>
+                <label class="choice"><input type="checkbox" name="injury" value="other"> Other</label>
+              </div>
+              <label for="injury_details">Additional details (optional)</label>
+              <textarea id="injury_details" rows="3" maxlength="5000"
+                placeholder="Describe your injury or limitations"></textarea>
+            </div>
+          </div>
+
+          <div class="assessment-section">
+            <h3>5. Current Activity Level</h3>
+            <label for="activity_level">How active are you outside workouts?</label>
+            <select id="activity_level" required>
+              <option value="">Select activity level</option>
+              <option value="sedentary">Sedentary — mostly sitting</option>
+              <option value="lightly_active">Lightly active — occasional walking</option>
+              <option value="moderately_active">Moderately active — regular movement</option>
+              <option value="very_active">Very active — frequent exercise or physical work</option>
+              <option value="extra_active">Extra active — intense daily activity</option>
+            </select>
+          </div>
+
+          <div class="assessment-section">
+            <h3>6. Workout Goal</h3>
+            <label for="workout_goal">What is your main goal?</label>
+            <select id="workout_goal" required>
+              <option value="">Select your goal</option>
+              <option value="weight_loss">Weight loss</option>
+              <option value="muscle_gain">Muscle gain</option>
+              <option value="strength">Build strength</option>
+              <option value="endurance">Improve endurance</option>
+              <option value="general_fitness">General fitness</option>
+              <option value="mobility">Improve mobility and flexibility</option>
+              <option value="maintenance">Maintain current fitness</option>
+            </select>
+          </div>
+
+          <button class="btn" id="saveAssessmentBtn" type="submit">
+            Save Workout Assessment
+          </button>
+          <p class="msg" id="assessmentMessage" role="status"></p>
+        </form>
+      </div>
+    </main>
+  </div>
+
+  <script src="api.js"></script>
+  <script src="nav.js"></script>
+  <script>
+    bootShell('workout-assessment.html');
+
+    const form = document.getElementById('assessmentForm');
+    const statusBox = document.getElementById('assessmentStatus');
+    const message = document.getElementById('assessmentMessage');
+    const saveButton = document.getElementById('saveAssessmentBtn');
+
+    function setMessage(text, type = '') {
+      message.className = type ? `msg ${type}` : 'msg';
+      message.textContent = text;
+    }
+
+    function setChecked(name, values) {
+      const selected = Array.isArray(values) ? values : [];
+      document.querySelectorAll(`input[name="${name}"]`).forEach(input => {
+        input.checked = selected.includes(input.value);
+      });
+    }
+
+    function selectedValues(name) {
+      return Array.from(
+        document.querySelectorAll(`input[name="${name}"]:checked`)
+      ).map(input => input.value);
+    }
+
+    function updateInjuryVisibility() {
+      const hasInjuries = document.getElementById('has_injuries').value;
+      document.getElementById('injuryDetailsSection').hidden =
+        hasInjuries !== 'true';
+    }
+
+    document.getElementById('has_injuries').addEventListener(
+      'change',
+      updateInjuryVisibility
+    );
+
+    async function loadAssessment() {
+      try {
+        const data = await apiGet('/workouts/assessment');
+        const a = data.assessment || {};
+
+        document.getElementById('training_experience').value =
+          a.training_experience || '';
+        document.getElementById('training_age_months').value =
+          a.training_age_months ?? '';
+        document.getElementById('workout_days_per_week').value =
+          a.workout_days_per_week ?? '';
+        document.getElementById('session_duration_minutes').value =
+          a.session_duration_minutes ?? '';
+
+        setChecked('equipment', a.available_equipment);
+        document.getElementById('has_injuries').value =
+          a.has_injuries === true ? 'true' :
+          a.has_injuries === false ? 'false' : '';
+
+        setChecked('injury', a.injured_body_parts);
+        document.getElementById('injury_details').value =
+          a.injury_details || '';
+
+        document.getElementById('activity_level').value =
+          a.activity_level || '';
+        document.getElementById('workout_goal').value =
+          a.workout_goal || '';
+
+        updateInjuryVisibility();
+
+        statusBox.textContent = data.completed
+          ? 'Your workout assessment is complete. You can update your answers anytime.'
+          : 'Your workout assessment is incomplete. Complete all required questions to unlock recommendations.';
+      } catch (error) {
+        statusBox.textContent = error.message || 'Unable to load your assessment.';
+        setMessage(statusBox.textContent, 'err');
+      }
+    }
+
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+
+      const equipment = selectedValues('equipment');
+      if (!equipment.length) {
+        setMessage('Select at least one available equipment option.', 'err');
+        return;
+      }
+
+      const injuryValue = document.getElementById('has_injuries').value;
+      if (injuryValue === '') {
+        setMessage('Please answer the injury question.', 'err');
+        return;
+      }
+
+      const payload = {
+        training_experience: document.getElementById('training_experience').value,
+        training_age_months: Number(document.getElementById('training_age_months').value),
+        workout_days_per_week: Number(document.getElementById('workout_days_per_week').value),
+        session_duration_minutes: Number(document.getElementById('session_duration_minutes').value),
+        available_equipment: equipment,
+        has_injuries: injuryValue === 'true',
+        injured_body_parts: injuryValue === 'true' ? selectedValues('injury') : [],
+        injury_details: injuryValue === 'true'
+          ? document.getElementById('injury_details').value.trim()
+          : '',
+        activity_level: document.getElementById('activity_level').value,
+        workout_goal: document.getElementById('workout_goal').value
+      };
+
+      saveButton.disabled = true;
+      saveButton.textContent = 'Saving...';
+      setMessage('');
+
+      try {
+        const result = await apiPut('/workouts/assessment', payload);
+
+        statusBox.textContent = result.completed
+          ? 'Assessment completed successfully. Workout recommendations are now available.'
+          : 'Assessment saved, but some required answers are still incomplete.';
+
+        setMessage(result.message || 'Assessment saved.', result.completed ? 'ok' : '');
+      } catch (error) {
+        setMessage(error.message || 'Unable to save assessment.', 'err');
+      } finally {
+        saveButton.disabled = false;
+        saveButton.textContent = 'Save Workout Assessment';
+      }
+    });
+
+    loadAssessment();
+  </script>
+</body>
+</html>

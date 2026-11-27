@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dashboard | NutriFit Member</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <main class="main">
+      <div class="topbar">
+        <h1>Dashboard</h1>
+        <div id="userChip" class="muted">Member</div>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <h3>Calories Target</h3>
+          <div class="stat-value" id="statCalories">—</div>
+        </div>
+        <div class="card">
+          <h3>Steps Today</h3>
+          <div class="stat-value" id="statSteps">—</div>
+        </div>
+        <div class="card">
+          <h3>Active kcal</h3>
+          <div class="stat-value" id="statActive">—</div>
+        </div>
+        <div class="card">
+          <h3>Loyalty pts</h3>
+          <div class="stat-value" id="statLoyalty">—</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Today's Nutrition</h2>
+        <div class="muted" id="nutritionStatus">Loading...</div>
+        <div class="progress"><span id="barCalories" style="width:0%"></span></div>
+        <div class="muted" id="nutritionText">—</div>
+      </div>
+
+      <div class="card">
+        <h2>Health Sync Status</h2>
+        <p class="muted">
+          Browsers cannot read Apple HealthKit or Google Health Connect.
+          Use <a href="health.html">Health Sync</a> for manual entry, or the
+          NutriFit mobile app to push device data into the same API.
+        </p>
+        <div class="stat-value" id="syncStatus" style="font-size:1.2rem; margin-top:8px;">Not connected</div>
+      </div>
+    </main>
+  </div>
+
+  <script src="api.js"></script>
+  <script src="nav.js"></script>
+  <script>
+    // Inject sidebar and set user chip
+    bootShell('dashboard.html');
+
+    function setText(id, val) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = val ?? '—';
+    }
+
+    async function loadDashboard() {
+      // 1. Profile / TDEE (calories target)
+      try {
+        const tdee = await apiGet('/users/tdee');
+        const target = tdee?.calculations?.target_calories ?? tdee?.target_calories ?? tdee?.tdee;
+        setText('statCalories', target ? Math.round(target) : '—');
+      } catch { 
+        setText('statCalories', '—'); 
+      }
+
+      // 2. Loyalty points
+      try {
+        const loyalty = await apiGet('/loyalty/points');
+        setText('statLoyalty', loyalty?.total_points ?? loyalty?.points ?? '—');
+      } catch { 
+        setText('statLoyalty', '—'); 
+      }
+
+      // 3. Today's meals (nutrition) - FIXED: reads 'consumed' and 'targets' objects
+      try {
+        const summary = await apiGet('/meals/summary') || {};
+        const consumed = summary.consumed || {};
+        const targets = summary.targets || {};
+        
+        const cal = consumed.calories ?? 0;
+        const p = consumed.protein_g ?? 0;
+        const c = consumed.carbs_g ?? 0;
+        const f = consumed.fat_g ?? 0;
+        
+        document.getElementById('nutritionStatus').textContent = 'Meals logged today';
+        document.getElementById('nutritionText').textContent = 
+          `${Math.round(cal)} kcal · P ${Math.round(p)}g · C ${Math.round(c)}g · F ${Math.round(f)}g`;
+        
+        const target = Number(targets.calories) || 2000;
+        const pct = target ? Math.min(100, Math.round((cal / target) * 100)) : 0;
+        document.getElementById('barCalories').style.width = pct + '%';
+      } catch (e) {
+        console.error('Nutrition summary error:', e);
+        document.getElementById('nutritionStatus').textContent = 'Could not load nutrition';
+      }
+
+      // 4. Steps / active kcal (device data not available in browser)
+      setText('statSteps', '—');
+      setText('statActive', '—');
+    }
+
+    loadDashboard();
+  </script>
+</body>
+</html>

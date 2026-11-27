@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -118,7 +118,7 @@
         const bmr = Math.round(t?.bmr || 0);
         const tdee = Math.round(t?.tdee || t?.daily_calories || 0);
         document.getElementById('tdeeBox').textContent = 
-          `BMR: ${bmr} · TDEE: ${tdee} kcal` + (t?.macros ? ' · P/C/F targets available' : '');
+          `BMR: ${bmr} Â· TDEE: ${tdee} kcal` + (t?.macros ? ' Â· P/C/F targets available' : '');
       } catch (e) {
         console.error('TDEE load error:', e);
       }
@@ -144,12 +144,19 @@
         
         msg.className = 'msg ok';
         msg.textContent = 'Profile saved successfully!';
+
+        const nextStep = await getOnboardingNextStep();
+
+        if (nextStep && nextStep !== 'profile.html') {
+          window.location.href = nextStep;
+          return;
+        }
         
         // Refresh TDEE after save
         const t = await apiGet('/users/tdee');
         const bmr = Math.round(t?.bmr || 0);
         const tdee = Math.round(t?.tdee || t?.daily_calories || 0);
-        document.getElementById('tdeeBox').textContent = `BMR: ${bmr} · TDEE: ${tdee} kcal`;
+        document.getElementById('tdeeBox').textContent = `BMR: ${bmr} Â· TDEE: ${tdee} kcal`;
         
       } catch (err) {
         msg.className = 'msg err';
@@ -159,3 +166,4 @@
   </script>
 </body>
 </html>
+

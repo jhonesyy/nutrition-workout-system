@@ -1,4 +1,5 @@
 const pool = require('../../config/db');
+const { computeTargets } = require('../../services/nutritionCalc');
 
 // ======================
 // LOG A MEAL (catalog OR custom / AI-generated)
@@ -150,11 +151,11 @@ const getMealLogsByDate = async (date) => {
 // ======================
 const getDailySummary = async (userId) => {
   const totalsResult = await pool.query(
-    `SELECT 
-        COALESCE(SUM(calories), 0) as total_calories,
-        COALESCE(SUM(protein_g), 0) as total_protein,
-        COALESCE(SUM(carbs_g), 0) as total_carbs,
-        COALESCE(SUM(fat_g), 0) as total_fat
+    `SELECT
+        COALESCE(SUM(calories), 0) AS total_calories,
+        COALESCE(SUM(protein_g), 0) AS total_protein,
+        COALESCE(SUM(carbs_g), 0) AS total_carbs,
+        COALESCE(SUM(fat_g), 0) AS total_fat
      FROM meal_logs
      WHERE user_id = $1 AND log_date = CURRENT_DATE`,
     [userId]
@@ -164,7 +165,8 @@ const getDailySummary = async (userId) => {
 
   const profileResult = await pool.query(
     `SELECT age, sex, height_cm, weight_kg, activity_factor, goal_type
-     FROM user_profiles WHERE user_id = $1`,
+     FROM user_profiles
+     WHERE user_id = $1`,
     [userId]
   );
 
@@ -172,74 +174,34 @@ const getDailySummary = async (userId) => {
     throw new Error('Profile not found. Please complete your profile first.');
   }
 
-  const profile = profileResult.rows[0];
-  const weight = parseFloat(profile.weight_kg);
-  const height = parseFloat(profile.height_cm);
-  const age = parseInt(profile.age);
-  const activityFactor = parseFloat(profile.activity_factor) || 1.2;
-  const sex = profile.sex.toLowerCase();
-  const goalType = (profile.goal_type || '').toLowerCase();
+  // Use the shared nutrition calculator.
+  // It validates age, sex, height, and weight.
+  const targets = computeTargets(profileResult.rows[0]);
 
-  let bmr = sex === 'male'
-    ? 10 * weight + 6.25 * height - 5 * age + 5
-    : 10 * weight + 6.25 * height - 5 * age - 161;
-
-  const tdee = Math.round(bmr * activityFactor);
-
-  let calorieAdjustment = 0;
-  let proteinRatio = 0.30;
-  let carbRatio = 0.40;
-  let fatRatio = 0.30;
-
-  switch (goalType) {
-    case 'weight loss':
-    case 'cutting':
-      calorieAdjustment = -500;
-      proteinRatio = 0.35;
-      carbRatio = 0.35;
-      fatRatio = 0.30;
-      break;
-    case 'bulking':
-      calorieAdjustment = 400;
-      proteinRatio = 0.30;
-      carbRatio = 0.45;
-      fatRatio = 0.25;
-      break;
-    case 'recomposition':
-    case 'toning':
-      calorieAdjustment = 0;
-      proteinRatio = 0.35;
-      carbRatio = 0.35;
-      fatRatio = 0.30;
-      break;
-    default:
-      calorieAdjustment = 0;
-  }
-
-  const targetCalories = Math.round(tdee + calorieAdjustment);
-  const targetProtein = Math.round((targetCalories * proteinRatio) / 4);
-  const targetCarbs = Math.round((targetCalories * carbRatio) / 4);
-  const targetFat = Math.round((targetCalories * fatRatio) / 9);
+  const consumed = {
+    calories: Number(totals.total_calories),
+    protein_g: Number(totals.total_protein),
+    carbs_g: Number(totals.total_carbs),
+    fat_g: Number(totals.total_fat)
+  };
 
   return {
     date: new Date().toISOString().split('T')[0],
-    consumed: {
-      calories: parseFloat(totals.total_calories),
-      protein_g: parseFloat(totals.total_protein),
-      carbs_g: parseFloat(totals.total_carbs),
-      fat_g: parseFloat(totals.total_fat)
-    },
+
+    consumed,
+
     targets: {
-      calories: targetCalories,
-      protein_g: targetProtein,
-      carbs_g: targetCarbs,
-      fat_g: targetFat
+      calories: targets.target_calories,
+      protein_g: targets.protein_g,
+      carbs_g: targets.carbs_g,
+      fat_g: targets.fat_g
     },
+
     remaining: {
-      calories: targetCalories - parseFloat(totals.total_calories),
-      protein_g: targetProtein - parseFloat(totals.total_protein),
-      carbs_g: targetCarbs - parseFloat(totals.total_carbs),
-      fat_g: targetFat - parseFloat(totals.total_fat)
+      calories: targets.target_calories - consumed.calories,
+      protein_g: targets.protein_g - consumed.protein_g,
+      carbs_g: targets.carbs_g - consumed.carbs_g,
+      fat_g: targets.fat_g - consumed.fat_g
     }
   };
 };

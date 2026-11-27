@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -74,7 +74,7 @@
           <thead>
             <tr><th>Date</th><th>Exercise</th><th>Sets</th><th>Reps</th><th>Weight</th></tr>
           </thead>
-          <tbody id="historyBody"><tr><td colspan="5">Loading…</td></tr></tbody>
+          <tbody id="historyBody"><tr><td colspan="5">Loadingâ€¦</td></tr></tbody>
         </table>
       </div>
     </main>
@@ -86,27 +86,63 @@
     bootShell('activity.html');
 
     async function loadStats() {
-      document.getElementById('statWeeklyWorkouts').textContent = '—';
-      document.getElementById('statVolume').textContent = '—';
+      const workoutsElement = document.getElementById('statWeeklyWorkouts');
+      const volumeElement = document.getElementById('statVolume');
+
+      workoutsElement.textContent = 'Loading...';
+      volumeElement.textContent = 'Loading...';
+
+      try {
+        const stats = await apiGet('/workouts/stats/weekly');
+
+        workoutsElement.textContent =
+          Number(stats.workoutsThisWeek || 0).toLocaleString();
+
+        volumeElement.textContent =
+          Number(stats.totalVolumeKg || 0).toLocaleString(undefined, {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2
+          });
+      } catch (error) {
+        console.error('Weekly workout stats error:', error);
+        workoutsElement.textContent = '—';
+        volumeElement.textContent = '—';
+      }
     }
 
     async function loadWorkoutRecs() {
       const box = document.getElementById('recWorkoutList');
-      box.innerHTML = '<p class="muted">Loading…</p>';
+      box.innerHTML = '<p class="muted">Loadingâ€¦</p>';
       try {
+        const assessmentStatus = await apiGet('/workouts/assessment');
+
+        if (!assessmentStatus.mobilityCompleted) {
+          box.innerHTML = `
+            <p class="msg">Complete your Mobility Test first.</p>
+            <a class="btn" href="mobility.html">Take Mobility Test</a>`;
+          return;
+        }
+
+        if (!assessmentStatus.completed) {
+          box.innerHTML = `
+            <p class="msg">Complete your Workout Assessment to unlock recommendations.</p>
+            <a class="btn" href="workout-assessment.html">Complete Workout Assessment</a>`;
+          return;
+        }
+
         const data = await apiGet('/workouts/recommend') || {};
         const groups = Array.isArray(data.recommendations) ? data.recommendations : [];
-        document.getElementById('recGoalLine').textContent = `Goal: ${data.goal || 'general'} · focus: ${data.weekly_focus || 'balanced'}`;
+        document.getElementById('recGoalLine').textContent = `Goal: ${data.goal || 'general'} Â· focus: ${data.weekly_focus || 'balanced'}`;
 
         if (!groups.length) {
-          box.innerHTML = '<p class="muted">No exercises in dataset yet. Add them in Admin → Exercises.</p>';
+          box.innerHTML = '<p class="muted">No exercises in dataset yet. Add them in Admin â†’ Exercises.</p>';
           return;
         }
 
         let html = '';
         groups.forEach(g => {
           const list = Array.isArray(g.exercises) ? g.exercises : [];
-          html += `<div style="margin:14px 0 6px"><strong>${g.focus}</strong><span class="muted"> — ${g.reason || ''}</span></div>`;
+          html += `<div style="margin:14px 0 6px"><strong>${g.focus}</strong><span class="muted"> â€” ${g.reason || ''}</span></div>`;
           if (!list.length) {
             html += '<p class="muted" style="margin:4px 0 8px">No matching exercises.</p>';
             return;
@@ -114,8 +150,8 @@
           html += list.map(e => `
             <div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px">
               <strong>${e.name || 'Unknown'}</strong>
-              <span class="muted"> · ${e.muscle_group || '—'} · ${e.equipment || '—'} · ${e.difficulty || '—'}</span>
-              <div class="muted">Suggested: ${e.default_sets || 3} × ${e.default_reps || '10'}</div>
+              <span class="muted"> Â· ${e.muscle_group || 'â€”'} Â· ${e.equipment || 'â€”'} Â· ${e.difficulty || 'â€”'}</span>
+              <div class="muted">Suggested: ${e.default_sets || 3} Ã— ${e.default_reps || '10'}</div>
               <button class="btn secondary" type="button"
                 data-id="${e.id}" data-name="${(e.name||'').replace(/"/g,'&quot;')}"
                 data-sets="${e.default_sets||3}" data-reps="${(e.default_reps||'10')}">Log this</button>
@@ -149,15 +185,15 @@
       document.getElementById('log_sets').value = sets || 3;
       document.getElementById('log_reps').value = reps || 10;
       document.getElementById('logMsg').className = 'msg';
-      document.getElementById('logMsg').textContent = 'Ready to log — adjust weight if needed, then Save.';
+      document.getElementById('logMsg').textContent = 'Ready to log â€” adjust weight if needed, then Save.';
       document.getElementById('workoutLogForm').scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
     async function logExerciseDirect(payload, btnEl) {
-      if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Logging…'; }
+      if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Loggingâ€¦'; }
       try {
         await apiPost('/workouts/log', payload);
-        if (btnEl) { btnEl.textContent = '✓ Logged'; }
+        if (btnEl) { btnEl.textContent = 'âœ“ Logged'; }
         await loadHistory();
       } catch (err) {
         if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Log Exercise'; }
@@ -168,7 +204,7 @@
         async function askAIWorkoutPlan() {
       const box = document.getElementById('aiResultBox');
       const btn = document.getElementById('btnAskAI');
-      box.innerHTML = '<p class="muted">Generating structured AI workout plan…</p>';
+      box.innerHTML = '<p class="muted">Generating structured AI workout planâ€¦</p>';
       btn.disabled = true;
       lastAIWorkout = null;
       try {
@@ -206,7 +242,7 @@
           plan.daysPerWeek ? `${plan.daysPerWeek} days/week` : null,
           plan.sessionDurationMinutes ? `~${plan.sessionDurationMinutes} min/session` : null,
           plan.meta && plan.meta.fallback ? '(rule-based fallback)' : null,
-        ].filter(Boolean).join(' · ');
+        ].filter(Boolean).join(' Â· ');
 
         let html = `<div style="background:#121820;padding:12px;border-radius:8px;border:1px solid var(--border);margin-bottom:12px">
           <strong>${String(title).replace(/</g,'&lt;')}</strong>
@@ -216,7 +252,7 @@
         </div>`;
 
         if (Array.isArray(plan.warmup) && plan.warmup.length) {
-          html += `<div class="muted" style="margin-bottom:8px"><strong>Warm-up:</strong> ${plan.warmup.map(s => String(s).replace(/</g,'&lt;')).join(' · ')}</div>`;
+          html += `<div class="muted" style="margin-bottom:8px"><strong>Warm-up:</strong> ${plan.warmup.map(s => String(s).replace(/</g,'&lt;')).join(' Â· ')}</div>`;
         }
 
         if (!allExercises.length) {
@@ -231,16 +267,16 @@
               const sets = ex.sets || ex.default_sets || 3;
               const reps = ex.reps || ex.default_reps || '10';
               const restSec = ex.restSeconds || ex.rest_seconds || null;
-              const rest = restSec ? ` · rest ${restSec}s` : '';
-              const equip = ex.equipment ? ` · ${ex.equipment}` : '';
-              const muscle = (ex.muscleGroup || ex.muscle_group) ? ` · ${ex.muscleGroup || ex.muscle_group}` : '';
+              const rest = restSec ? ` Â· rest ${restSec}s` : '';
+              const equip = ex.equipment ? ` Â· ${ex.equipment}` : '';
+              const muscle = (ex.muscleGroup || ex.muscle_group) ? ` Â· ${ex.muscleGroup || ex.muscle_group}` : '';
               const cues = Array.isArray(ex.formCues) && ex.formCues.length
-                ? `<div class="muted" style="font-size:0.9em;margin-top:4px">${ex.formCues.map(c => String(c).replace(/</g,'&lt;')).join(' · ')}</div>`
+                ? `<div class="muted" style="font-size:0.9em;margin-top:4px">${ex.formCues.map(c => String(c).replace(/</g,'&lt;')).join(' Â· ')}</div>`
                 : '';
               html += `<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px">
                 <strong>${String(name).replace(/</g,'&lt;')}</strong>
                 <span class="muted">${muscle}${equip}${rest}</span>
-                <div class="muted">${sets} × ${reps}</div>
+                <div class="muted">${sets} Ã— ${reps}</div>
                 ${cues}
                 <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
                   <button class="btn secondary btn-fill-logger" type="button"
@@ -254,7 +290,7 @@
         }
 
         if (Array.isArray(plan.cooldown) && plan.cooldown.length) {
-          html += `<div class="muted" style="margin-top:10px"><strong>Cool-down:</strong> ${plan.cooldown.map(s => String(s).replace(/</g,'&lt;')).join(' · ')}</div>`;
+          html += `<div class="muted" style="margin-top:10px"><strong>Cool-down:</strong> ${plan.cooldown.map(s => String(s).replace(/</g,'&lt;')).join(' Â· ')}</div>`;
         }
 
         box.innerHTML = html;
@@ -277,7 +313,7 @@
         if (entire && allExercises.length) {
           entire.onclick = async () => {
             entire.disabled = true;
-            entire.textContent = 'Logging all…';
+            entire.textContent = 'Logging allâ€¦';
             let ok = 0;
             for (const ex of allExercises) {
               try {
@@ -292,7 +328,7 @@
                 ok++;
               } catch (_) {}
             }
-            entire.textContent = `✓ Logged ${ok} exercises`;
+            entire.textContent = `âœ“ Logged ${ok} exercises`;
             await loadHistory();
           };
         }
@@ -308,7 +344,7 @@
     document.getElementById('workoutLogForm').onsubmit = async (e) => {
       e.preventDefault();
       const msg = document.getElementById('logMsg');
-      msg.className = 'msg'; msg.textContent = 'Saving…';
+      msg.className = 'msg'; msg.textContent = 'Savingâ€¦';
       const idVal = document.getElementById('log_exercise_id').value;
       const nameVal = (document.getElementById('log_exercise_name').value || '').trim();
       if (!idVal && !nameVal) {
@@ -343,11 +379,11 @@
         }
         body.innerHTML = rows.map(r => `
           <tr>
-            <td>${r.log_date || '—'}</td>
+            <td>${r.log_date || 'â€”'}</td>
             <td>${r.exercise_name || 'Unknown'}</td>
-            <td>${r.sets_completed ?? '—'}</td>
-            <td>${r.reps_completed ?? '—'}</td>
-            <td>${r.weight_kg != null ? r.weight_kg + ' kg' : '—'}</td>
+            <td>${r.sets_completed ?? 'â€”'}</td>
+            <td>${r.reps_completed ?? 'â€”'}</td>
+            <td>${r.weight_kg != null ? r.weight_kg + ' kg' : 'â€”'}</td>
           </tr>
         `).join('');
       } catch (e) {
@@ -361,3 +397,5 @@
   </script>
 </body>
 </html>
+
+

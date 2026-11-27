@@ -1,0 +1,454 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mobility Test | NutriFit Member</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .mobility-intro { line-height: 1.6; }
+
+    .movement-card {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+      margin: 16px 0;
+    }
+
+    .movement-card h3 { margin-top: 0; }
+
+    .movement-meta {
+      font-size: .9rem;
+      opacity: .8;
+      margin-bottom: 12px;
+    }
+
+    .movement-instructions {
+      line-height: 1.7;
+      white-space: pre-line;
+    }
+
+    .movement-video {
+      width: 100%;
+      max-width: 720px;
+      display: block;
+      margin: 14px 0;
+      border-radius: 10px;
+      background: #000;
+    }
+
+    .video-missing {
+      padding: 14px;
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      margin: 12px 0;
+      opacity: .8;
+    }
+
+    .safety-notes {
+      padding: 12px;
+      border-left: 4px solid #d69e36;
+      background: var(--card, rgba(127,127,127,.12));
+      border-radius: 6px;
+      margin: 12px 0;
+      white-space: pre-line;
+    }
+
+    .answer-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+      margin-top: 14px;
+    }
+
+    .answer-grid label {
+      display: block;
+      margin-bottom: 7px;
+    }
+
+    .answer-grid select { width: 100%; }
+
+    .mobility-status {
+      padding: 12px;
+      border-radius: 8px;
+      margin: 12px 0;
+      background: var(--card, rgba(127,127,127,.12));
+    }
+
+    .mobility-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .movement-count {
+      opacity: .8;
+      margin-top: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="app" id="app">
+    <main class="main">
+      <div class="topbar">
+        <h1>Mobility Test</h1>
+        <div id="userChip" class="muted">Member</div>
+      </div>
+
+      <div class="card">
+        <h2>Movement Screening</h2>
+        <p class="muted mobility-intro">
+          Complete the movement checks below. Follow each instruction and
+          watch its tutorial video when available. Your answers help NutriFit
+          understand your current movement ability.
+        </p>
+
+        <div class="mobility-status" id="mobilityStatus">
+          Checking your mobility test status...
+        </div>
+
+        <p class="msg">
+          <strong>Safety:</strong>
+          Perform movements slowly, in a clear space, and only within a
+          comfortable range. Do not force a stretch or movement. Stop if you
+          feel pain, dizziness, numbness, or unusual symptoms. Choose
+          "Prefer not to attempt" if unsure. This is a basic self-screening
+          tool, not a medical diagnosis.
+        </p>
+
+        <div class="movement-count" id="movementCount"></div>
+      </div>
+
+      <form id="mobilityForm">
+        <div class="card">
+          <div id="movementList">
+            Loading mobility movements...
+          </div>
+
+          <div class="mobility-actions">
+            <button class="btn" id="saveMobilityBtn" type="submit">
+              Save Mobility Test
+            </button>
+
+            <button class="btn secondary" type="button" id="reloadMobilityBtn">
+              Reload Saved Answers
+            </button>
+          </div>
+
+          <p class="msg" id="mobilityMessage" role="status"></p>
+        </div>
+      </form>
+    </main>
+  </div>
+
+  <script src="api.js"></script>
+  <script src="nav.js"></script>
+  <script>
+    bootShell('mobility.html');
+
+    let movements = [];
+    let savedAnswers = {};
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (character) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+      })[character]);
+    }
+
+    function setMobilityMessage(message, type = '') {
+      const element = document.getElementById('mobilityMessage');
+      element.className = type ? `msg ${type}` : 'msg';
+      element.textContent = message;
+    }
+
+    function setMobilityStatus(completed, completedAt) {
+      const element = document.getElementById('mobilityStatus');
+
+      if (!completed) {
+        element.textContent =
+          'Not completed yet. Complete all active movement checks and save your answers.';
+        return;
+      }
+
+      const dateText = completedAt
+        ? new Date(completedAt).toLocaleString()
+        : 'Previously completed';
+
+      element.textContent =
+        `Completed: ${dateText}. You can retake this test anytime.`;
+    }
+
+    function renderMovements() {
+      const container = document.getElementById('movementList');
+
+      document.getElementById('movementCount').textContent =
+        `${movements.length} active movement check(s)`;
+
+      if (!movements.length) {
+        container.innerHTML =
+          '<p class="msg">No active mobility movements are available. Please contact the administrator.</p>';
+
+        document.getElementById('saveMobilityBtn').disabled = true;
+        return;
+      }
+
+      document.getElementById('saveMobilityBtn').disabled = false;
+
+      container.innerHTML = movements.map((movement, index) => {
+        const abilityId = `movementAbility${index}`;
+        const painId = `movementPain${index}`;
+
+        const video = movement.video_url
+          ? `
+            <video
+              class="movement-video"
+              controls
+              preload="metadata"
+              playsinline
+              src="${escapeHtml(movement.video_url)}">
+              Your browser does not support video playback.
+            </video>
+          `
+          : `
+            <div class="video-missing">
+              Tutorial video has not been uploaded for this movement yet.
+            </div>
+          `;
+
+        const description = movement.description
+          ? `<p>${escapeHtml(movement.description)}</p>`
+          : '';
+
+        const instructions = movement.instructions
+          ? `<div class="movement-instructions">${escapeHtml(movement.instructions)}</div>`
+          : '';
+
+        const safety = movement.safety_notes
+          ? `<div class="safety-notes"><strong>Safety reminders:</strong><br>${escapeHtml(movement.safety_notes)}</div>`
+          : '';
+
+        return `
+          <section class="movement-card" data-movement-key="${escapeHtml(movement.movement_key)}">
+            <h3>${index + 1}. ${escapeHtml(movement.name)}</h3>
+
+            <div class="movement-meta">
+              Body area: ${escapeHtml(movement.body_area || 'General')}
+            </div>
+
+            ${description}
+            ${video}
+
+            <h4>Instructions</h4>
+            ${instructions}
+            ${safety}
+
+            <div class="answer-grid">
+              <div>
+                <label for="${abilityId}">Were you able to perform it?</label>
+                <select
+                  id="${abilityId}"
+                  class="movement-ability"
+                  data-index="${index}"
+                  required>
+                  <option value="">Select an answer</option>
+                  <option value="able">Able</option>
+                  <option value="unable">Unable</option>
+                  <option value="prefer_not_to_attempt">Prefer not to attempt</option>
+                </select>
+              </div>
+
+              <div class="pain-question" id="painQuestion${index}">
+                <label for="${painId}">Did you feel pain?</label>
+                <select
+                  id="${painId}"
+                  class="movement-pain"
+                  data-index="${index}">
+                  <option value="">Select an answer</option>
+                  <option value="false">No pain</option>
+                  <option value="true">Yes, I felt pain</option>
+                </select>
+              </div>
+            </div>
+          </section>
+        `;
+      }).join('');
+
+      movements.forEach((movement, index) => {
+        const answer = savedAnswers[movement.movement_key];
+
+        document.getElementById(`movementAbility${index}`).value =
+          answer?.ability || '';
+
+        document.getElementById(`movementPain${index}`).value =
+          typeof answer?.pain === 'boolean'
+            ? String(answer.pain)
+            : '';
+
+        updatePainQuestion(index);
+      });
+
+      document.querySelectorAll('.movement-ability').forEach((select) => {
+        select.addEventListener('change', () => {
+          updatePainQuestion(Number(select.dataset.index));
+        });
+      });
+    }
+
+    function updatePainQuestion(index) {
+      const ability = document.getElementById(`movementAbility${index}`);
+      const pain = document.getElementById(`movementPain${index}`);
+      const wrapper = document.getElementById(`painQuestion${index}`);
+
+      if (!ability || !pain || !wrapper) return;
+
+      const skipsPain = ability.value === 'prefer_not_to_attempt';
+
+      wrapper.hidden = skipsPain;
+      pain.required = !skipsPain;
+      pain.disabled = skipsPain;
+
+      if (skipsPain) {
+        pain.value = '';
+      }
+    }
+    async function loadMobilityTest() {
+      const reloadButton = document.getElementById('reloadMobilityBtn');
+      reloadButton.disabled = true;
+
+      try {
+        const [movementData, testData] = await Promise.all([
+          apiGet('/workouts/mobility-test/movements'),
+          apiGet('/workouts/mobility-test')
+        ]);
+
+        movements = Array.isArray(movementData?.movements)
+          ? movementData.movements
+          : [];
+
+        savedAnswers = testData?.movement_screening || {};
+
+        renderMovements();
+
+        setMobilityStatus(
+          Boolean(testData?.completed),
+          testData?.completed_at
+        );
+
+        setMobilityMessage(
+          testData?.completed
+            ? 'Your saved answers are loaded. You may update and save them again.'
+            : 'Complete every active movement check before saving.'
+        );
+      } catch (error) {
+        console.error('Load mobility test error:', error);
+
+        document.getElementById('movementList').textContent =
+          error.message || 'Unable to load mobility movements.';
+
+        setMobilityMessage(
+          error.message || 'Unable to load mobility test.',
+          'err'
+        );
+      } finally {
+        reloadButton.disabled = false;
+      }
+    }
+
+    document.getElementById('mobilityForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+
+      const button = document.getElementById('saveMobilityBtn');
+
+      if (!movements.length) {
+        setMobilityMessage('No active mobility movements are available.', 'err');
+        return;
+      }
+
+      const movementScreening = {};
+      let incompleteMovement = null;
+
+      movements.forEach((movement, index) => {
+        const ability = document.getElementById(`movementAbility${index}`).value;
+        const pain = document.getElementById(`movementPain${index}`).value;
+
+        if (!ability) {
+          incompleteMovement = movement.name;
+          return;
+        }
+
+        const skipsPain = ability === 'prefer_not_to_attempt';
+
+        if (!skipsPain && pain === '') {
+          incompleteMovement = movement.name;
+          return;
+        }
+
+        movementScreening[movement.movement_key] = {
+          ability,
+          pain: skipsPain ? null : pain === 'true'
+        };
+      });
+
+      if (incompleteMovement) {
+        setMobilityMessage(
+          `Complete the required answer for: ${incompleteMovement}.`,
+          'err'
+        );
+        return;
+      }
+
+      button.disabled = true;
+      button.textContent = 'Saving...';
+
+      try {
+        const result = await apiPut('/workouts/mobility-test', {
+          movement_screening: movementScreening
+        });
+
+        savedAnswers = movementScreening;
+
+        setMobilityStatus(
+          result.completed,
+          result.completed_at
+        );
+
+        setMobilityMessage(
+          'Mobility test saved successfully. You can retake it anytime.',
+          'ok'
+        );
+
+        const nextStep = await getOnboardingNextStep();
+
+        if (nextStep && nextStep !== 'mobility.html') {
+          window.location.href = nextStep;
+          return;
+        }
+      } catch (error) {
+        console.error('Save mobility test error:', error);
+
+        setMobilityMessage(
+          error.message || 'Unable to save mobility test.',
+          'err'
+        );
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Save Mobility Test';
+      }
+    });
+
+    document.getElementById('reloadMobilityBtn').addEventListener(
+      'click',
+      loadMobilityTest
+    );
+
+    loadMobilityTest();
+  </script>
+</body>
+</html>
+
+
+

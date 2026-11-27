@@ -3,6 +3,27 @@ const bcrypt = require('bcrypt');
 
 const SALT_ROUNDS = 10;
 
+
+const toOptionalStringArray = (value, field) => {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  if (!Array.isArray(value)) {
+    throw new Error(`${field} must be an array`);
+  }
+
+  return value.map((item) => {
+    if (typeof item !== 'string' || !item.trim()) {
+      throw new Error(`${field} must contain non-empty strings`);
+    }
+
+    return item.trim();
+  });
+};
+
+
+
 // ======================
 // GET PROFILE
 // ======================
@@ -15,6 +36,7 @@ const getProfile = async (userId) => {
        u.full_name,
        u.role,
        u.created_at,
+
        p.age,
        p.sex,
        p.height_cm,
@@ -22,7 +44,17 @@ const getProfile = async (userId) => {
        p.activity_factor,
        p.goal_type,
        p.goal_category,
-       p.allergens
+       p.allergens,
+
+       p.liked_foods,
+       p.disliked_foods,
+       p.dietary_preferences,
+       p.dietary_restrictions,
+       p.food_spice_preference,
+       p.usual_meal_frequency,
+       p.food_budget_per_day,
+       p.food_preferences_notes
+
      FROM users u
      LEFT JOIN user_profiles p
        ON u.id = p.user_id
@@ -30,7 +62,7 @@ const getProfile = async (userId) => {
     [userId]
   );
 
-  return result.rows[0];
+  return result.rows[0] || null;
 };
 
 // ======================
@@ -46,8 +78,104 @@ const upsertProfile = async (userId, data) => {
     activity_factor,
     goal_type,
     goal_category,
-    allergens
+    allergens,
+    food_spice_preference,
+    usual_meal_frequency,
+    food_budget_per_day,
+    food_preferences_notes
   } = data;
+
+  const likedFoods = toOptionalStringArray(
+    data.liked_foods,
+    'liked_foods'
+  );
+
+  const dislikedFoods = toOptionalStringArray(
+    data.disliked_foods,
+    'disliked_foods'
+  );
+
+  const dietaryPreferences = toOptionalStringArray(
+    data.dietary_preferences,
+    'dietary_preferences'
+  );
+
+  const dietaryRestrictions = toOptionalStringArray(
+    data.dietary_restrictions,
+    'dietary_restrictions'
+  );
+
+  const normalizedSpicePreference =
+    food_spice_preference === undefined ||
+    food_spice_preference === null ||
+    food_spice_preference === ''
+      ? null
+      : String(food_spice_preference).trim().toLowerCase();
+
+  const allowedSpicePreferences = [
+    'mild',
+    'medium',
+    'spicy',
+    'no_preference'
+  ];
+
+  if (
+    normalizedSpicePreference &&
+    !allowedSpicePreferences.includes(normalizedSpicePreference)
+  ) {
+    throw new Error('Invalid food_spice_preference');
+  }
+
+  let mealFrequency = null;
+
+  if (
+    usual_meal_frequency !== undefined &&
+    usual_meal_frequency !== null &&
+    usual_meal_frequency !== ''
+  ) {
+    mealFrequency = Number(usual_meal_frequency);
+
+    if (
+      !Number.isInteger(mealFrequency) ||
+      mealFrequency < 1 ||
+      mealFrequency > 8
+    ) {
+      throw new Error(
+        'usual_meal_frequency must be between 1 and 8'
+      );
+    }
+  }
+
+  let foodBudget = null;
+
+  if (
+    food_budget_per_day !== undefined &&
+    food_budget_per_day !== null &&
+    food_budget_per_day !== ''
+  ) {
+    foodBudget = Number(food_budget_per_day);
+
+    if (!Number.isFinite(foodBudget) || foodBudget < 0) {
+      throw new Error('Invalid food_budget_per_day');
+    }
+  }
+
+  if (
+    food_preferences_notes !== undefined &&
+    food_preferences_notes !== null &&
+    typeof food_preferences_notes !== 'string'
+  ) {
+    throw new Error('food_preferences_notes must be a string');
+  }
+
+  if (
+    typeof food_preferences_notes === 'string' &&
+    food_preferences_notes.length > 3000
+  ) {
+    throw new Error(
+      'food_preferences_notes cannot exceed 3000 characters'
+    );
+  }
 
   const existing = await pool.query(
     'SELECT id FROM user_profiles WHERE user_id = $1',
@@ -57,6 +185,7 @@ const upsertProfile = async (userId, data) => {
   if (existing.rows.length > 0) {
     const result = await pool.query(
       `UPDATE user_profiles SET
+
          age = COALESCE($1, age),
          sex = COALESCE($2, sex),
          height_cm = COALESCE($3, height_cm),
@@ -65,8 +194,27 @@ const upsertProfile = async (userId, data) => {
          goal_type = COALESCE($6, goal_type),
          goal_category = COALESCE($7, goal_category),
          allergens = COALESCE($8, allergens),
+
+         liked_foods = COALESCE($9, liked_foods),
+         disliked_foods = COALESCE($10, disliked_foods),
+         dietary_preferences = COALESCE($11, dietary_preferences),
+         dietary_restrictions = COALESCE($12, dietary_restrictions),
+
+         food_spice_preference =
+           COALESCE($13, food_spice_preference),
+
+         usual_meal_frequency =
+           COALESCE($14, usual_meal_frequency),
+
+         food_budget_per_day =
+           COALESCE($15, food_budget_per_day),
+
+         food_preferences_notes =
+           COALESCE($16, food_preferences_notes),
+
          updated_at = CURRENT_TIMESTAMP
-       WHERE user_id = $9
+
+       WHERE user_id = $17
        RETURNING *`,
       [
         age,
@@ -77,6 +225,14 @@ const upsertProfile = async (userId, data) => {
         goal_type,
         goal_category,
         allergens,
+        likedFoods,
+        dislikedFoods,
+        dietaryPreferences,
+        dietaryRestrictions,
+        normalizedSpicePreference,
+        mealFrequency,
+        foodBudget,
+        food_preferences_notes,
         userId
       ]
     );
@@ -85,19 +241,35 @@ const upsertProfile = async (userId, data) => {
   }
 
   const result = await pool.query(
-    `INSERT INTO user_profiles
-       (
-         user_id,
-         age,
-         sex,
-         height_cm,
-         weight_kg,
-         activity_factor,
-         goal_type,
-         goal_category,
-         allergens
-       )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    `INSERT INTO user_profiles (
+       user_id,
+       age,
+       sex,
+       height_cm,
+       weight_kg,
+       activity_factor,
+       goal_type,
+       goal_category,
+       allergens,
+
+       liked_foods,
+       disliked_foods,
+       dietary_preferences,
+       dietary_restrictions,
+       food_spice_preference,
+       usual_meal_frequency,
+       food_budget_per_day,
+       food_preferences_notes
+     )
+     VALUES (
+       $1, $2, $3, $4, $5, COALESCE($6, 1.2),
+       $7, $8, $9,
+       COALESCE($10, '{}'),
+       COALESCE($11, '{}'),
+       COALESCE($12, '{}'),
+       COALESCE($13, '{}'),
+       $14, $15, $16, $17
+     )
      RETURNING *`,
     [
       userId,
@@ -105,10 +277,18 @@ const upsertProfile = async (userId, data) => {
       sex,
       height_cm,
       weight_kg,
-      activity_factor || 1.2,
+      activity_factor,
       goal_type,
       goal_category,
-      allergens
+      allergens,
+      likedFoods,
+      dislikedFoods,
+      dietaryPreferences,
+      dietaryRestrictions,
+      normalizedSpicePreference,
+      mealFrequency,
+      foodBudget,
+      food_preferences_notes
     ]
   );
 

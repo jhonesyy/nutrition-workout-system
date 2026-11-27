@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -22,11 +22,11 @@
         <a href="nutrition.html">Nutrition</a>
         <a href="meals.html">Meal Logs</a>
         <a href="exercises.html">Exercises</a>
+        <a href="mobility.html">Mobility Test</a>
         <a href="workouts-log.html">Workout Logs</a>
         <a href="loyalty.html">Loyalty & Rewards</a>
         <a href="analytics.html" class="active">Analytics</a>
         <a href="gym-settings.html">Gym Settings</a>
-        <a href="minigame.html">Minigame Quizzes</a>
         <a href="account.html">Account</a>
         <a href="index.html" class="logout">Logout</a>
       </nav>
@@ -43,22 +43,22 @@
 
         <div class="stat-card">
           <h3>Active Users (7 days)</h3>
-          <p id="statActiveUsers">—</p>
+          <p id="statActiveUsers">â€”</p>
         </div>
 
         <div class="stat-card">
           <h3>Meals Logged (7 days)</h3>
-          <p id="statMeals7d">—</p>
+          <p id="statMeals7d">â€”</p>
         </div>
 
         <div class="stat-card">
           <h3>Points Redeemed</h3>
-          <p id="statPoints">—</p>
+          <p id="statPoints">â€”</p>
         </div>
 
         <div class="stat-card">
           <h3>Active Rewards</h3>
-          <p id="statRewards">—</p>
+          <p id="statRewards">â€”</p>
         </div>
 
       </section>
@@ -122,24 +122,24 @@
         }
 
         document.getElementById('statActiveUsers').textContent =
-          data.active_users_7d ?? '—';
+          data.active_users_7d ?? 'â€”';
 
         document.getElementById('statMeals7d').textContent =
-          data.meals_logged_7d ?? '—';
+          data.meals_logged_7d ?? 'â€”';
 
         document.getElementById('statPoints').textContent =
-          data.points_redeemed ?? '—';
+          data.points_redeemed ?? 'â€”';
 
         document.getElementById('statRewards').textContent =
-          data.active_rewards ?? '—';
+          data.active_rewards ?? 'â€”';
 
       } catch (e) {
         console.error(e);
 
-        document.getElementById('statActiveUsers').textContent = '—';
-        document.getElementById('statMeals7d').textContent = '—';
-        document.getElementById('statPoints').textContent = '—';
-        document.getElementById('statRewards').textContent = '—';
+        document.getElementById('statActiveUsers').textContent = 'â€”';
+        document.getElementById('statMeals7d').textContent = 'â€”';
+        document.getElementById('statPoints').textContent = 'â€”';
+        document.getElementById('statRewards').textContent = 'â€”';
       }
     }
 

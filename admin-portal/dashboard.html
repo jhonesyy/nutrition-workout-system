@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -22,11 +22,11 @@
         <a href="nutrition.html">Nutrition</a>
         <a href="meals.html">Meal Logs</a>
         <a href="exercises.html">Exercises</a>
+        <a href="mobility.html">Mobility Test</a>
         <a href="workouts-log.html">Workout Logs</a>
         <a href="loyalty.html">Loyalty & Rewards</a>
         <a href="analytics.html">Analytics</a>
         <a href="gym-settings.html">Gym Settings</a>
-        <a href="minigame.html">Minigame Quizzes</a>
         <a href="account.html">Account</a>
         <a href="index.html" class="logout" id="logoutBtn">Logout</a>
       </nav>
@@ -43,22 +43,22 @@
 
         <div class="stat-card">
           <h3>Total Users</h3>
-          <p id="statUsers">—</p>
+          <p id="statUsers">â€”</p>
         </div>
 
         <div class="stat-card">
           <h3>Meals Logged Today</h3>
-          <p id="statMeals">—</p>
+          <p id="statMeals">â€”</p>
         </div>
 
         <div class="stat-card">
           <h3>Workouts Completed</h3>
-          <p id="statWorkouts">—</p>
+          <p id="statWorkouts">â€”</p>
         </div>
 
         <div class="stat-card">
           <h3>QR Redeemed Today</h3>
-          <p id="statQR">—</p>
+          <p id="statQR">â€”</p>
         </div>
 
       </section>
@@ -120,23 +120,23 @@
         }
 
         document.getElementById('statUsers').textContent =
-          data.total_users ?? '—';
+          data.total_users ?? 'â€”';
 
         document.getElementById('statMeals').textContent =
-          data.meals_logged_today ?? '—';
+          data.meals_logged_today ?? 'â€”';
 
         document.getElementById('statWorkouts').textContent =
-          data.workouts_completed ?? '—';
+          data.workouts_completed ?? 'â€”';
 
         document.getElementById('statQR').textContent =
-          data.qr_redeemed_today ?? '—';
+          data.qr_redeemed_today ?? 'â€”';
 
       } catch (e) {
         console.error('Dashboard stats error:', e);
-        document.getElementById('statUsers').textContent = '—';
-        document.getElementById('statMeals').textContent = '—';
-        document.getElementById('statWorkouts').textContent = '—';
-        document.getElementById('statQR').textContent = '—';
+        document.getElementById('statUsers').textContent = 'â€”';
+        document.getElementById('statMeals').textContent = 'â€”';
+        document.getElementById('statWorkouts').textContent = 'â€”';
+        document.getElementById('statQR').textContent = 'â€”';
       }
     }
 

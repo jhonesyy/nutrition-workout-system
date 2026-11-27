@@ -1,0 +1,1636 @@
+
+const pool = require('../../config/db');
+
+// ======================
+// EXERCISE MANAGEMENT
+// ======================
+
+const getAllExercises = async ({ muscle_group, difficulty, equipment } = {}) => {
+  let query = `SELECT * FROM exercises WHERE 1=1`;
+  const values = [];
+  let idx = 1;
+
+  if (muscle_group) {
+    query += ` AND muscle_group ILIKE $${idx++}`;
+    values.push(`%${muscle_group}%`);
+  }
+
+  if (difficulty) {
+    query += ` AND difficulty ILIKE $${idx++}`;
+    values.push(difficulty);
+  }
+
+  if (equipment) {
+    query += ` AND equipment ILIKE $${idx++}`;
+    values.push(`%${equipment}%`);
+  }
+
+  query += ` ORDER BY muscle_group, name`;
+
+  const result = await pool.query(query, values);
+  return result.rows;
+};
+
+const getExerciseById = async (id) => {
+  const result = await pool.query(
+    `SELECT * FROM exercises WHERE id = $1`,
+    [id]
+  );
+
+  return result.rows[0];
+};
+
+const createExercise = async (data) => {
+  const {
+    name,
+    muscle_group,
+    equipment,
+    difficulty,
+    default_sets,
+    default_reps,
+    rest_seconds,
+    common_errors,
+    form_tips
+  } = data;
+
+  if (!name) throw new Error('Exercise name is required');
+
+  const result = await pool.query(
+    `INSERT INTO exercises (
+      name, muscle_group, equipment, difficulty,
+      default_sets, default_reps, rest_seconds,
+      common_errors, form_tips
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    RETURNING *`,
+    [
+      name,
+      muscle_group || null,
+      equipment || null,
+      difficulty || null,
+      default_sets || null,
+      default_reps || null,
+      rest_seconds || null,
+      common_errors || null,
+      form_tips || null
+    ]
+  );
+
+  return result.rows[0];
+};
+
+const updateExercise = async (id, data) => {
+  const {
+    name,
+    muscle_group,
+    equipment,
+    difficulty,
+    default_sets,
+    default_reps,
+    rest_seconds,
+    common_errors,
+    form_tips
+  } = data;
+
+  const result = await pool.query(
+    `UPDATE exercises
+     SET name = COALESCE($1, name),
+         muscle_group = COALESCE($2, muscle_group),
+         equipment = COALESCE($3, equipment),
+         difficulty = COALESCE($4, difficulty),
+         default_sets = COALESCE($5, default_sets),
+         default_reps = COALESCE($6, default_reps),
+         rest_seconds = COALESCE($7, rest_seconds),
+         common_errors = COALESCE($8, common_errors),
+         form_tips = COALESCE($9, form_tips),
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $10
+     RETURNING *`,
+    [
+      name,
+      muscle_group,
+      equipment,
+      difficulty,
+      default_sets,
+      default_reps,
+      rest_seconds,
+      common_errors,
+      form_tips,
+      id
+    ]
+  );
+
+  return result.rows[0] || null;
+};
+
+const deleteExercise = async (id) => {
+  const result = await pool.query(
+    `DELETE FROM exercises
+     WHERE id = $1
+     RETURNING id, name`,
+    [id]
+  );
+
+  return result.rows[0] || null;
+};
+
+// ======================
+// WORKOUT LOGGING
+// ======================
+
+const logWorkout = async (userId, data) => {
+  const {
+    exercise_id,
+    exercise_name,
+    sets_completed,
+    reps_completed,
+    weight_kg,
+    duration_minutes,
+    notes,
+    log_date
+  } = data;
+
+  let name = (exercise_name || '').trim() || null;
+  let resolvedId = exercise_id ? Number(exercise_id) : null;
+
+  if (resolvedId && Number.isNaN(resolvedId)) {
+    resolvedId = null;
+  }
+
+  if (resolvedId && !name) {
+    const ex = await pool.query(
+      'SELECT name FROM exercises WHERE id = $1',
+      [resolvedId]
+    );
+
+    name = ex.rows[0]?.name || null;
+  }
+
+  if (!resolvedId && !name) {
+    throw new Error('Either exercise_id or exercise_name is required');
+  }
+
+  const sets = sets_completed != null
+    ? Number(sets_completed)
+    : null;
+
+  if (sets != null && (Number.isNaN(sets) || sets < 0 || sets > 100)) {
+    throw new Error('sets_completed must be between 0 and 100');
+  }
+
+  const weight = weight_kg != null
+    ? Number(weight_kg)
+    : null;
+
+  if (weight != null && (Number.isNaN(weight) || weight < 0 || weight > 2000)) {
+    throw new Error('weight_kg must be between 0 and 2000');
+  }
+
+  const duration = duration_minutes != null
+    ? Number(duration_minutes)
+    : null;
+
+  if (
+    duration != null &&
+    (Number.isNaN(duration) || duration < 0 || duration > 1440)
+  ) {
+    throw new Error('duration_minutes must be between 0 and 1440');
+  }
+
+  const result = await pool.query(
+    `INSERT INTO workout_logs (
+      user_id, exercise_id, exercise_name,
+      sets_completed, reps_completed, weight_kg,
+      duration_minutes, notes, log_date
+    )
+    VALUES (
+      $1, $2, $3, $4, $5, $6, $7, $8,
+      COALESCE($9::date, CURRENT_DATE)
+    )
+    RETURNING *`,
+    [
+      userId,
+      resolvedId,
+      name,
+      sets,
+      reps_completed != null ? String(reps_completed) : null,
+      weight,
+      duration,
+      notes || null,
+      log_date || null
+    ]
+  );
+
+  return result.rows[0];
+};
+
+const getMyWorkoutLogs = async (userId, limit = 50) => {
+  const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
+
+  const result = await pool.query(
+    `SELECT *
+     FROM workout_logs
+     WHERE user_id = $1
+     ORDER BY log_date DESC, created_at DESC
+     LIMIT $2`,
+    [userId, safeLimit]
+  );
+
+  return result.rows;
+};
+
+const getAdminWorkoutLogs = async (limit = 50) => {
+  const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
+
+  const result = await pool.query(
+    `SELECT wl.*, u.email, u.full_name
+     FROM workout_logs wl
+     JOIN users u ON u.id = wl.user_id
+     ORDER BY wl.created_at DESC
+     LIMIT $1`,
+    [safeLimit]
+  );
+
+  return result.rows;
+};
+
+const countWorkoutsToday = async () => {
+  const result = await pool.query(
+    `SELECT COUNT(*)::int AS count
+     FROM workout_logs
+     WHERE log_date = CURRENT_DATE`
+  );
+
+  return result.rows[0].count;
+};
+
+// ======================
+// SHARED HELPERS
+// ======================
+
+const normalize = (value) =>
+  String(value || '').trim().toLowerCase();
+
+const parseFirstNumber = (value, fallback = 0) => {
+  const match = String(value || '').match(/\d+/);
+  return match ? Number(match[0]) : fallback;
+};
+
+const parseRepTarget = (value, fallback = '8-12') => {
+  const text = normalize(value);
+
+  if (!text) return fallback;
+
+  const range = text.match(/(\d+)\s*(?:-|to)\s*(\d+)/i);
+
+  if (range) {
+    return `${range[1]}-${range[2]}`;
+  }
+
+  const single = text.match(/\d+/);
+
+  if (single) {
+    return single[0];
+  }
+
+  if (text.includes('second') || text.includes('sec')) {
+    return '20-30 seconds';
+  }
+
+  if (text.includes('minute') || text.includes('min')) {
+    return '30-45 seconds';
+  }
+
+  return fallback;
+};
+
+const getAllowedEquipment = (assessmentEquipment = []) => {
+  const aliases = {
+    dumbbell: ['dumbbell', 'dumbbells'],
+    dumbbells: ['dumbbell', 'dumbbells'],
+    'body only': ['body only', 'bodyweight', 'body weight'],
+    bodyweight: ['body only', 'bodyweight', 'body weight']
+  };
+
+  const allowed = new Set();
+
+  for (const item of assessmentEquipment) {
+    const key = normalize(item);
+
+    if (aliases[key]) {
+      aliases[key].forEach((alias) => allowed.add(alias));
+    } else if (key) {
+      allowed.add(key);
+    }
+  }
+
+  return allowed;
+};
+
+const equipmentIsAllowed = (exerciseEquipment, allowedEquipment) => {
+  const equipment = normalize(exerciseEquipment);
+
+  if (!equipment) return false;
+
+  return allowedEquipment.has(equipment);
+};
+
+const hasUnselectedEquipmentRequirement = (
+  exercise,
+  allowedEquipment
+) => {
+  const instructions = normalize(
+    `${exercise.instructions || ''} ${exercise.form_tips || ''}`
+  );
+
+  if (!instructions) {
+    return true;
+  }
+
+  const requirements = [
+    {
+      pattern: /\b(incline bench|decline bench|flat bench|utility bench|military press bench|bench)\b/,
+      allowed: ['bench', 'flat bench', 'incline bench', 'decline bench']
+    },
+    {
+      pattern: /\b(pull[- ]?up bar|chin[- ]?up bar|pullup bar)\b/,
+      allowed: ['pull-up bar', 'pull up bar', 'chin-up bar']
+    },
+    {
+      pattern: /\b(parallel bars|dip bars|above the bars|between the bars)\b/,
+      allowed: ['parallel bars', 'dip bars']
+    },
+    {
+      pattern: /\b(smith machine|power rack|squat rack|bar in a rack|rack)\b/,
+      allowed: ['rack', 'power rack', 'smith machine']
+    },
+    {
+      pattern: /\b(cable machine|cable pulley|cable)\b/,
+      allowed: ['cable', 'cable machine']
+    },
+    {
+      pattern: /\b(machine|leg press machine)\b/,
+      allowed: ['machine']
+    },
+    {
+      pattern: /\b(stability ball|exercise ball|swiss ball)\b/,
+      allowed: ['exercise ball', 'stability ball']
+    },
+    {
+      pattern: /\b(box|sturdy elevated platform|elevated platform)\b/,
+      allowed: ['box', 'platform', 'elevated platform']
+    },
+    {
+      pattern: /\b(partner|training partner)\b/,
+      allowed: ['partner']
+    },
+    {
+      pattern: /\b(towel)\b/,
+      allowed: ['towel']
+    },
+    {
+      pattern: /\b(barbell|olympic bar|ez[- ]curl bar)\b/,
+      allowed: ['barbell', 'olympic bar', 'ez curl bar']
+    },
+    {
+      pattern: /\b(kettlebell)\b/,
+      allowed: ['kettlebell', 'kettlebells']
+    },
+    {
+      pattern: /\b(medicine ball)\b/,
+      allowed: ['medicine ball']
+    },
+    {
+      pattern: /\b(resistance band|exercise band)\b/,
+      allowed: ['band', 'resistance band']
+    }
+  ];
+
+  for (const requirement of requirements) {
+    if (!requirement.pattern.test(instructions)) {
+      continue;
+    }
+
+    const userHasRequiredEquipment = requirement.allowed.some((item) =>
+      allowedEquipment.has(item)
+    );
+
+    if (!userHasRequiredEquipment) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+const isExplosiveExercise = (exercise) => {
+  const name = normalize(exercise.name);
+  const instructions = normalize(
+    `${exercise.instructions || ''} ${exercise.form_tips || ''}`
+  );
+
+  const explosivePattern =
+    /\b(jump|jumping|jumped|leap|leaping|hop|hopping|plyometric|explosive)\b/;
+
+  return (
+    explosivePattern.test(name) ||
+    explosivePattern.test(instructions)
+  );
+};
+
+const getInjuryMuscleGroups = (injuredParts = []) => {
+  const mappings = {
+    shoulder: ['shoulders', 'traps', 'chest'],
+    shoulders: ['shoulders', 'traps', 'chest'],
+    knee: ['quadriceps', 'hamstrings', 'calves', 'adductors'],
+    knees: ['quadriceps', 'hamstrings', 'calves', 'adductors'],
+    back: ['lats', 'middle back', 'lower back', 'traps'],
+    lower_back: ['lower back', 'middle back'],
+    'lower back': ['lower back', 'middle back'],
+    hip: ['glutes', 'abductors', 'adductors', 'quadriceps', 'hamstrings'],
+    hips: ['glutes', 'abductors', 'adductors', 'quadriceps', 'hamstrings'],
+    elbow: ['biceps', 'triceps', 'forearms'],
+    elbows: ['biceps', 'triceps', 'forearms'],
+    wrist: ['forearms'],
+    wrists: ['forearms'],
+    ankle: ['calves'],
+    ankles: ['calves'],
+    neck: ['neck', 'traps']
+  };
+
+  const excluded = new Set();
+
+  for (const part of injuredParts) {
+    const key = normalize(part).replace(/[\s-]+/g, '_');
+    const groups = mappings[key] || mappings[normalize(part)];
+
+    if (groups) {
+      groups.forEach((group) => excluded.add(group));
+    }
+  }
+
+  return excluded;
+};
+
+// ======================
+// PROGRESSION
+// ======================
+
+const getProgressionData = async (userId) => {
+  const result = await pool.query(
+    `SELECT
+       wl.exercise_id,
+       wl.log_date,
+       wl.sets_completed,
+       wl.reps_completed,
+       e.difficulty,
+       e.default_sets,
+       e.default_reps
+     FROM workout_logs wl
+     LEFT JOIN exercises e ON e.id = wl.exercise_id
+     WHERE wl.user_id = $1
+       AND wl.log_date >= CURRENT_DATE - INTERVAL '28 days'
+     ORDER BY wl.log_date DESC`,
+    [userId]
+  );
+
+  const logs = result.rows;
+
+  const trainingDays = new Set(
+    logs.map((log) => {
+      const date = log.log_date instanceof Date
+        ? log.log_date.toISOString().slice(0, 10)
+        : String(log.log_date).slice(0, 10);
+
+      return date;
+    })
+  ).size;
+
+  const successfulLogs = {
+    beginner: 0,
+    intermediate: 0,
+    advanced: 0
+  };
+
+  for (const log of logs) {
+    if (!log.exercise_id || !log.difficulty) continue;
+
+    const difficulty = normalize(log.difficulty);
+
+    if (!Object.prototype.hasOwnProperty.call(successfulLogs, difficulty)) {
+      continue;
+    }
+
+    const completedSets = Number(log.sets_completed);
+    const requiredSets = parseFirstNumber(log.default_sets, 3);
+    const completedReps = parseFirstNumber(log.reps_completed, 0);
+    const requiredReps = parseFirstNumber(log.default_reps, 8);
+
+    if (
+      completedSets >= requiredSets &&
+      completedReps >= requiredReps
+    ) {
+      successfulLogs[difficulty] += 1;
+    }
+  }
+
+  return {
+    trainingDays,
+    successfulLogs
+  };
+};
+
+const getProgressionLevel = (experience, progressionData) => {
+  const trainingDays = progressionData.trainingDays;
+  const successful = progressionData.successfulLogs;
+
+  if (experience === 'advanced') {
+    return {
+      allowed: ['beginner', 'intermediate', 'advanced'],
+      currentLevel: 'advanced',
+      nextLevel: null,
+      unlocked: true,
+      message: 'All exercise difficulty levels are available.'
+    };
+  }
+
+  if (experience === 'intermediate') {
+    const canUnlockAdvanced =
+      trainingDays >= 12 &&
+      successful.intermediate >= 5;
+
+    return {
+      allowed: canUnlockAdvanced
+        ? ['beginner', 'intermediate', 'advanced']
+        : ['beginner', 'intermediate'],
+      currentLevel: canUnlockAdvanced ? 'advanced' : 'intermediate',
+      nextLevel: canUnlockAdvanced ? null : 'advanced',
+      unlocked: canUnlockAdvanced,
+      message: canUnlockAdvanced
+        ? 'Advanced exercises unlocked based on recent training performance.'
+        : 'Log at least 12 training days and 5 successful intermediate exercise logs to unlock advanced exercises.'
+    };
+  }
+
+  const canUnlockIntermediate =
+    trainingDays >= 8 &&
+    successful.beginner >= 3;
+
+  return {
+    allowed: canUnlockIntermediate
+      ? ['beginner', 'intermediate']
+      : ['beginner'],
+    currentLevel: canUnlockIntermediate ? 'intermediate' : 'beginner',
+    nextLevel: canUnlockIntermediate ? null : 'intermediate',
+    unlocked: canUnlockIntermediate,
+    message: canUnlockIntermediate
+      ? 'Intermediate exercises unlocked based on recent training performance.'
+      : 'Log at least 8 training days and 3 successful beginner exercise logs to unlock intermediate exercises.'
+  };
+};
+
+// ======================
+// WORKOUT DAY TEMPLATES
+// ======================
+
+const DAY_TEMPLATES = {
+  fullA: {
+    label: 'Full Body A',
+    focus: 'Chest, quadriceps, middle back, shoulders and core',
+    groups: [
+      'chest',
+      'quadriceps',
+      'middle back',
+      'shoulders',
+      'abdominals'
+    ]
+  },
+  fullB: {
+    label: 'Full Body B',
+    focus: 'Glutes, hamstrings, chest, biceps and core',
+    groups: [
+      'glutes',
+      'hamstrings',
+      'chest',
+      'biceps',
+      'abdominals'
+    ]
+  },
+  fullC: {
+    label: 'Full Body C',
+    focus: 'Quadriceps, middle back, shoulders, triceps and core',
+    groups: [
+      'quadriceps',
+      'middle back',
+      'shoulders',
+      'triceps',
+      'abdominals'
+    ]
+  },
+  upperA: {
+    label: 'Upper Body A',
+    focus: 'Chest, middle back, shoulders, biceps and triceps',
+    groups: [
+      'chest',
+      'middle back',
+      'shoulders',
+      'biceps',
+      'triceps'
+    ]
+  },
+  lowerA: {
+    label: 'Lower Body A',
+    focus: 'Quadriceps, hamstrings, glutes and core',
+    groups: [
+      'quadriceps',
+      'hamstrings',
+      'glutes',
+      'abdominals'
+    ]
+  },
+  upperB: {
+    label: 'Upper Body B',
+    focus: 'Chest, shoulders, middle back, biceps and triceps',
+    groups: [
+      'chest',
+      'shoulders',
+      'middle back',
+      'biceps',
+      'triceps'
+    ]
+  },
+  lowerB: {
+    label: 'Lower Body B',
+    focus: 'Glutes, hamstrings, quadriceps and core',
+    groups: [
+      'glutes',
+      'hamstrings',
+      'quadriceps',
+      'abdominals'
+    ]
+  },
+  push: {
+    label: 'Push Day',
+    focus: 'Chest, shoulders and triceps',
+    groups: ['chest', 'shoulders', 'triceps']
+  },
+  pull: {
+    label: 'Pull Day',
+    focus: 'Middle back, biceps and core',
+    groups: ['middle back', 'biceps', 'abdominals']
+  },
+  legs: {
+    label: 'Leg Day',
+    focus: 'Quadriceps, hamstrings, glutes and core',
+    groups: ['quadriceps', 'hamstrings', 'glutes', 'abdominals']
+  }
+};
+
+const getWeeklyTemplates = (days) => {
+  if (days === 2) {
+    return ['fullA', 'fullB'];
+  }
+
+  if (days === 3) {
+    return ['fullA', 'fullB', 'fullC'];
+  }
+
+  if (days === 4) {
+    return ['upperA', 'lowerA', 'upperB', 'lowerB'];
+  }
+
+  if (days === 5) {
+    return ['fullA', 'fullB', 'fullC', 'upperA', 'lowerA'];
+  }
+
+  return ['push', 'pull', 'legs', 'push', 'pull', 'legs'];
+};
+
+// ======================
+// EXERCISE PRESCRIPTION
+// ======================
+
+const getPrescription = (exercise, experience) => {
+  const difficulty = normalize(exercise.difficulty);
+  const defaultSets = parseFirstNumber(exercise.default_sets, 0);
+  const defaultReps = parseRepTarget(exercise.default_reps, '');
+
+  let sets;
+  let reps;
+
+  if (defaultSets > 0) {
+    sets = Math.min(Math.max(defaultSets, 2), 4);
+  } else {
+    sets = experience === 'beginner' ? 2 : 3;
+  }
+
+  if (defaultReps) {
+    reps = defaultReps;
+  } else {
+    reps = '8-12';
+  }
+
+  if (experience === 'beginner') {
+    sets = Math.min(sets, 3);
+  }
+
+  const defaultRest = Number(exercise.rest_seconds);
+  let restSeconds = Number.isFinite(defaultRest) && defaultRest > 0
+    ? Math.min(Math.max(defaultRest, 30), 180)
+    : 90;
+
+  if (difficulty === 'advanced') {
+    restSeconds = Math.max(restSeconds, 90);
+  }
+
+  return {
+    sets,
+    reps,
+    rest_seconds: restSeconds
+  };
+};
+
+const getExerciseInstructions = (exercise) => {
+  const instructions = String(
+    exercise.instructions || exercise.form_tips || ''
+  ).trim();
+
+  return instructions || 'Follow controlled technique and stop if you experience pain.';
+};
+
+// ======================
+// DATASET-DRIVEN RECOMMENDATIONS
+// ======================
+
+
+const recommendWorkouts = async (userId) => {
+  // 1. Require completed assessment.
+  const assessmentResult = await pool.query(
+    `SELECT *
+     FROM workout.user_workout_assessments
+     WHERE user_id = $1
+       AND assessment_status = 'completed'`,
+    [userId]
+  );
+
+  const assessment = assessmentResult.rows[0];
+
+  if (!assessment) {
+    throw new Error(
+      'Complete your workout assessment before requesting recommendations.'
+    );
+  }
+
+  // 2. Profile context.
+  const profileResult = await pool.query(
+    `SELECT goal_type, goal_category
+     FROM user_profiles
+     WHERE user_id = $1`,
+    [userId]
+  );
+
+  const profile = profileResult.rows[0] || {};
+
+  const goalType = normalize(
+    assessment.workout_goal ||
+    profile.goal_type ||
+    'general fitness'
+  );
+
+  const goalCategory = normalize(profile.goal_category);
+
+  const isCut = [
+    'weight loss',
+    'cutting',
+    'fat loss',
+    'lean'
+  ].some((term) => goalType.includes(term) || goalCategory.includes(term));
+
+  const isBulk = [
+    'bulking',
+    'muscle gain',
+    'strength',
+    'mass',
+    'athletic'
+  ].some((term) => goalType.includes(term) || goalCategory.includes(term));
+
+  // 3. Equipment selected in assessment.
+  const allowedEquipment = getAllowedEquipment(
+    assessment.available_equipment
+  );
+
+  if (allowedEquipment.size === 0) {
+    throw new Error(
+      'Your assessment does not contain recognized available equipment. Update your assessment.'
+    );
+  }
+
+  // 4. Load exercise catalog.
+  const exResult = await pool.query(
+    `SELECT
+       id,
+       name,
+       muscle_group,
+       equipment,
+       difficulty,
+       default_sets,
+       default_reps,
+       rest_seconds,
+       form_tips,
+       instructions
+     FROM exercises
+     ORDER BY id ASC`
+  );
+
+  // 5. Progression eligibility.
+  const progressionData = await getProgressionData(userId);
+  const experience = normalize(assessment.training_experience);
+
+  const progression = getProgressionLevel(
+    experience,
+    progressionData
+  );
+
+  // 6. Injury exclusions.
+  const injuredParts = Array.isArray(assessment.injured_body_parts)
+    ? assessment.injured_body_parts
+    : [];
+
+  const excludedMuscles = getInjuryMuscleGroups(injuredParts);
+
+  const hasUnmappedInjury =
+    assessment.has_injuries &&
+    (
+      injuredParts.length === 0 ||
+      excludedMuscles.size === 0
+    );
+
+  if (hasUnmappedInjury) {
+    throw new Error(
+      'Your assessment reports an injury, but the affected body parts cannot be safely matched to exercise categories. Update your assessment before generating a workout plan.'
+    );
+  }
+
+  // 7. Filter catalog entries.
+  const eligible = exResult.rows.filter((exercise) => {
+    const muscle = normalize(exercise.muscle_group);
+    const difficulty = normalize(exercise.difficulty);
+
+    if (!exercise.id || !exercise.name || !muscle) {
+      return false;
+    }
+
+    if (!equipmentIsAllowed(exercise.equipment, allowedEquipment)) {
+      return false;
+    }
+
+    if (!progression.allowed.includes(difficulty)) {
+      return false;
+    }
+
+    if (excludedMuscles.has(muscle)) {
+      return false;
+    }
+
+    if (hasUnselectedEquipmentRequirement(exercise, allowedEquipment)) {
+      return false;
+    }
+
+    if (isExplosiveExercise(exercise)) {
+      return false;
+    }
+
+    return true;
+  });
+
+  if (eligible.length === 0) {
+    throw new Error(
+      'No exercises match your current equipment, difficulty, and injury restrictions. Update your assessment or ask an appropriate fitness professional for guidance.'
+    );
+  }
+
+  // 8. Build weekly training schedule.
+  const workoutDays = Math.min(
+    Math.max(Number(assessment.workout_days_per_week) || 3, 2),
+    6
+  );
+
+  const sessionDuration = Number(
+    assessment.session_duration_minutes
+  ) || 60;
+
+  const weeklyTemplateKeys = getWeeklyTemplates(workoutDays);
+
+  const usedExerciseIds = new Set();
+  const weeklyMuscleCounts = new Map();
+
+  // Supplemental muscle groups improve coverage when eligible.
+  const supplementalGroups = {
+    fullA: ['calves'],
+    fullB: ['lower back'],
+    fullC: ['chest'],
+    upperA: [],
+    lowerA: ['calves', 'lower back'],
+    upperB: [],
+    lowerB: ['calves', 'lower back'],
+    push: [],
+    pull: ['lower back'],
+    legs: ['calves', 'lower back']
+  };
+
+  // Score exercises using available data quality and variety.
+  // This is deterministic; it does not randomly select exercises.
+  const scoreExercise = (exercise, targetGroup, dayIndex) => {
+    let score = 0;
+
+    const instructions = String(
+      exercise.instructions || exercise.form_tips || ''
+    ).trim();
+
+    if (instructions.length >= 80) score += 3;
+    else if (instructions.length >= 30) score += 2;
+    else if (instructions.length > 0) score += 1;
+
+    if (Number(exercise.default_sets) > 0) score += 1;
+    if (exercise.default_reps) score += 1;
+    if (Number(exercise.rest_seconds) > 0) score += 1;
+
+    const difficulty = normalize(exercise.difficulty);
+
+    if (difficulty === experience) {
+      score += 2;
+    }
+
+    if (isBulk && [
+      'chest',
+      'middle back',
+      'lats',
+      'quadriceps',
+      'hamstrings',
+      'glutes',
+      'shoulders'
+    ].includes(targetGroup)) {
+      score += 1;
+    }
+
+    if (isCut && [
+      'quadriceps',
+      'hamstrings',
+      'glutes',
+      'calves'
+    ].includes(targetGroup)) {
+      score += 1;
+    }
+
+    const previousCount = weeklyMuscleCounts.get(targetGroup) || 0;
+    score -= previousCount * 2;
+
+    // Small deterministic rotation avoids always choosing the lowest ID.
+    const candidateRotation = Math.abs(
+      Number(exercise.id) + dayIndex * 7
+    ) % 11;
+
+    score += candidateRotation / 100;
+
+    return score;
+  };
+
+  const weeklySchedule = weeklyTemplateKeys.map((templateKey, index) => {
+    const template = DAY_TEMPLATES[templateKey];
+    const dayExercises = [];
+
+    const targetGroups = [
+      ...template.groups,
+      ...(supplementalGroups[templateKey] || [])
+    ];
+
+    // Add only supplemental groups that have eligible exercises.
+    const uniqueTargetGroups = [...new Set(targetGroups)];
+
+    for (const targetGroup of uniqueTargetGroups) {
+      const candidates = eligible
+        .filter((exercise) => {
+          return (
+            normalize(exercise.muscle_group) === targetGroup &&
+            !usedExerciseIds.has(Number(exercise.id))
+          );
+        })
+        .sort((a, b) => {
+          const scoreDifference =
+            scoreExercise(b, targetGroup, index) -
+            scoreExercise(a, targetGroup, index);
+
+          if (scoreDifference !== 0) {
+            return scoreDifference;
+          }
+
+          return Number(a.id) - Number(b.id);
+        });
+
+      const selected = candidates[0];
+
+      if (!selected) continue;
+
+      usedExerciseIds.add(Number(selected.id));
+
+      weeklyMuscleCounts.set(
+        targetGroup,
+        (weeklyMuscleCounts.get(targetGroup) || 0) + 1
+      );
+
+      const prescription = getPrescription(selected, experience);
+
+      dayExercises.push({
+        id: selected.id,
+        name: Number(selected.id) === 16
+          ? 'Bicycle Crunch'
+          : selected.name,
+        muscle_group: selected.muscle_group,
+        equipment: selected.equipment,
+        difficulty: selected.difficulty,
+        sets: prescription.sets,
+        reps: prescription.reps,
+        rest_seconds: prescription.rest_seconds,
+        instructions: getExerciseInstructions(selected)
+      });
+    }
+
+    const warmup = [
+      {
+        activity: 'Easy marching in place',
+        duration_minutes: 2,
+        instructions: 'Move at a comfortable pace.'
+      },
+      {
+        activity: 'Arm circles and shoulder mobility',
+        duration_minutes: 2,
+        instructions: 'Use small, controlled circles.'
+      },
+      {
+        activity: 'Hip hinges and gentle bodyweight squats',
+        duration_minutes: 2,
+        instructions: 'Move slowly within a comfortable range.'
+      },
+      {
+        activity: 'Easy movement rehearsal',
+        duration_minutes: 2,
+        instructions: 'Rehearse the movements planned for this session without added load.'
+      }
+    ];
+
+    const cooldown = [
+      {
+        activity: 'Slow walking and breathing',
+        duration_minutes: 2,
+        instructions: 'Gradually reduce your pace and breathe normally.'
+      },
+      {
+        activity: 'Gentle stretching',
+        duration_minutes: 3,
+        instructions: 'Stretch comfortably. Do not force a range of motion or stretch through pain.'
+      }
+    ];
+
+    // Estimate exercise time.
+    const exerciseCount = dayExercises.length;
+
+    const estimatedExerciseMinutes = dayExercises.reduce(
+      (total, exercise) => {
+        const repMatch = String(exercise.reps).match(/\d+/);
+
+        const repsPerSet = repMatch
+          ? Number(repMatch[0])
+          : 10;
+
+        const secondsPerSet = Math.max(
+          30,
+          repsPerSet * 3
+        );
+
+        const workMinutes =
+          (exercise.sets * secondsPerSet) / 60;
+
+        const restMinutes =
+          (
+            Math.max(0, exercise.sets - 1) *
+            exercise.rest_seconds
+          ) / 60;
+
+        return total + workMinutes + restMinutes;
+      },
+      0
+    );
+
+    const transitionMinutes = Math.max(
+      0,
+      exerciseCount - 1
+    );
+
+    const estimatedDuration = Math.ceil(
+      13 +
+      estimatedExerciseMinutes +
+      transitionMinutes
+    );
+
+    return {
+      day: index + 1,
+      label: template.label,
+      focus: template.focus,
+      session_duration_minutes: sessionDuration,
+      estimated_duration_minutes: Math.min(
+        estimatedDuration,
+        sessionDuration
+      ),
+      warmup,
+      exercises: dayExercises,
+      cooldown,
+      exercise_count: exerciseCount,
+      note: exerciseCount === 0
+        ? 'No matching exercises were found for this day. Review the exercise catalog and equipment assessment.'
+        : 'Complete the warm-up first. Perform each exercise with controlled technique and take the prescribed rest between sets.'
+    };
+  });
+
+  // 9. Ensure every training day has exercises.
+  const daysWithoutExercises = weeklySchedule.filter(
+    (day) => day.exercises.length === 0
+  );
+
+  if (daysWithoutExercises.length > 0) {
+    throw new Error(
+      `The exercise catalog does not contain enough eligible movements for Workout Day(s) ${daysWithoutExercises.map((day) => day.day).join(', ')}. Review the equipment labels, exercise instructions, and muscle-group data before generating this plan.`
+    );
+  }
+
+  // 10. Collect assigned exercises.
+  const assignedExercises = weeklySchedule.flatMap(
+    (day) => day.exercises
+  );
+
+  const strengthExercises = assignedExercises.filter((exercise) => {
+    return !['abdominals', 'core'].includes(
+      normalize(exercise.muscle_group)
+    );
+  });
+
+  const coreExercises = assignedExercises.filter((exercise) => {
+    return ['abdominals', 'core'].includes(
+      normalize(exercise.muscle_group)
+    );
+  });
+
+  // 11. Return complete plan.
+  return {
+    goal: goalType,
+
+    weekly_focus: isBulk
+      ? 'strength + volume'
+      : isCut
+        ? 'balanced strength training'
+        : 'balanced fitness',
+
+    training_frequency: workoutDays,
+
+    session_duration_minutes: sessionDuration,
+
+    assessment: {
+      training_experience: assessment.training_experience,
+      training_age_months: assessment.training_age_months,
+      workout_days_per_week: assessment.workout_days_per_week,
+      session_duration_minutes: assessment.session_duration_minutes,
+      available_equipment: assessment.available_equipment,
+      has_injuries: assessment.has_injuries,
+      injured_body_parts: assessment.injured_body_parts,
+      activity_level: assessment.activity_level
+    },
+
+    progression: {
+      current_level: progression.currentLevel,
+      allowed_difficulty: progression.allowed,
+      next_level: progression.nextLevel,
+      unlocked: progression.unlocked,
+      training_days_last_28_days: progressionData.trainingDays,
+      successful_beginner_logs: progressionData.successfulLogs.beginner,
+      successful_intermediate_logs: progressionData.successfulLogs.intermediate,
+      successful_advanced_logs: progressionData.successfulLogs.advanced,
+      message: progression.message,
+      progression_note: 'Progression unlocks are system rules based on recent workout logs, not a medical or scientifically validated readiness assessment.'
+    },
+
+    weekly_schedule: weeklySchedule,
+
+    recommendations: [
+      {
+        focus: 'Strength Training',
+        reason: 'Exercises assigned to the planned training days.',
+        exercises: strengthExercises
+      },
+      {
+        focus: 'Core Training',
+        reason: 'Core exercises assigned to the planned training days.',
+        exercises: coreExercises
+      }
+    ],
+
+    total_unique_exercises: assignedExercises.length,
+
+    safety_notice: assessment.has_injuries
+      ? 'Some muscle groups were excluded based on the injury areas selected. The exercise dataset does not contain complete medical contraindication information. These exclusions do not establish that the remaining exercises are medically safe. Seek qualified professional guidance before exercising with an injury.'
+      : 'General fitness recommendations only. Warm up before training, use controlled technique, and stop if you experience pain, dizziness, or unusual symptoms.'
+  };
+};
+
+
+  const assessment = assessmentResult.rows[0];
+
+  if (!assessment) {
+    throw new Error(
+      'Complete your workout assessment before requesting recommendations.'
+    );
+  }
+
+  // 2. Profile context.
+  const profileResult = await pool.query(
+    `SELECT goal_type, goal_category
+     FROM user_profiles
+     WHERE user_id = $1`,
+    [userId]
+  );
+
+  const profile = profileResult.rows[0] || {};
+
+  const goalType = normalize(
+    assessment.workout_goal ||
+    profile.goal_type ||
+    'general fitness'
+  );
+
+  const goalCategory = normalize(profile.goal_category);
+
+  const isCut = [
+    'weight loss',
+    'cutting',
+    'fat loss',
+    'lean'
+  ].some((term) => goalType.includes(term) || goalCategory.includes(term));
+
+  const isBulk = [
+    'bulking',
+    'muscle gain',
+    'strength',
+    'mass',
+    'athletic'
+  ].some((term) => goalType.includes(term) || goalCategory.includes(term));
+
+  // 3. Equipment selected in assessment.
+  const allowedEquipment = getAllowedEquipment(
+    assessment.available_equipment
+  );
+
+  if (allowedEquipment.size === 0) {
+    throw new Error(
+      'Your assessment does not contain recognized available equipment. Update your assessment.'
+    );
+  }
+
+  // 4. Load the catalog, including full instructions for equipment checks.
+  const exResult = await pool.query(
+    `SELECT
+       id,
+       name,
+       muscle_group,
+       equipment,
+       difficulty,
+       default_sets,
+       default_reps,
+       rest_seconds,
+       form_tips,
+       instructions
+     FROM exercises
+     ORDER BY id ASC`
+  );
+
+  // 5. Progression eligibility.
+  const progressionData = await getProgressionData(userId);
+  const experience = normalize(assessment.training_experience);
+
+  const progression = getProgressionLevel(
+    experience,
+    progressionData
+  );
+
+  // 6. Injury exclusions.
+  const injuredParts = Array.isArray(assessment.injured_body_parts)
+    ? assessment.injured_body_parts
+    : [];
+
+  const excludedMuscles = getInjuryMuscleGroups(injuredParts);
+
+  const hasUnmappedInjury =
+    assessment.has_injuries &&
+    (
+      injuredParts.length === 0 ||
+      excludedMuscles.size === 0
+    );
+
+  if (hasUnmappedInjury) {
+    throw new Error(
+      'Your assessment reports an injury, but the affected body parts cannot be safely matched to exercise categories. Update your assessment before generating a workout plan.'
+    );
+  }
+
+  // 7. Filter catalog entries.
+  const eligible = exResult.rows.filter((exercise) => {
+    const muscle = normalize(exercise.muscle_group);
+    const difficulty = normalize(exercise.difficulty);
+
+    if (!exercise.id || !exercise.name || !muscle) {
+      return false;
+    }
+
+    if (!equipmentIsAllowed(exercise.equipment, allowedEquipment)) {
+      return false;
+    }
+
+    if (!progression.allowed.includes(difficulty)) {
+      return false;
+    }
+
+    if (excludedMuscles.has(muscle)) {
+      return false;
+    }
+
+    if (hasUnselectedEquipmentRequirement(exercise, allowedEquipment)) {
+      return false;
+    }
+
+    if (isExplosiveExercise(exercise)) {
+      return false;
+    }
+
+    return true;
+  });
+
+  if (eligible.length === 0) {
+    throw new Error(
+      'No exercises match your current equipment, difficulty, and injury restrictions. Update your assessment or ask an appropriate fitness professional for guidance.'
+    );
+  }
+
+  // 8. Build each day's exercise list.
+  const workoutDays = Math.min(
+    Math.max(Number(assessment.workout_days_per_week) || 3, 2),
+    6
+  );
+
+  const sessionDuration = Number(
+    assessment.session_duration_minutes
+  ) || 60;
+
+  const weeklyTemplateKeys = getWeeklyTemplates(workoutDays);
+  const usedExerciseIds = new Set();
+
+  const weeklySchedule = weeklyTemplateKeys.map((templateKey, index) => {
+    const template = DAY_TEMPLATES[templateKey];
+    const dayExercises = [];
+
+    for (const targetGroup of template.groups) {
+      const candidates = eligible.filter((exercise) => {
+        return (
+          normalize(exercise.muscle_group) === targetGroup &&
+          !usedExerciseIds.has(exercise.id)
+        );
+      });
+
+      const selected = candidates[0];
+
+      if (!selected) continue;
+
+      usedExerciseIds.add(selected.id);
+
+      const prescription = getPrescription(selected, experience);
+
+      dayExercises.push({
+        id: selected.id,
+        name: Number(selected.id) === 16
+          ? 'Bicycle Crunch'
+          : selected.name,
+        muscle_group: selected.muscle_group,
+        equipment: selected.equipment,
+        difficulty: selected.difficulty,
+        sets: prescription.sets,
+        reps: prescription.reps,
+        rest_seconds: prescription.rest_seconds,
+        instructions: getExerciseInstructions(selected)
+      });
+    }
+
+    const warmup = [
+      {
+        activity: 'Easy marching in place',
+        duration_minutes: 2,
+        instructions: 'Move at a comfortable pace.'
+      },
+      {
+        activity: 'Arm circles and shoulder mobility',
+        duration_minutes: 2,
+        instructions: 'Use small, controlled circles.'
+      },
+      {
+        activity: 'Hip hinges and gentle bodyweight squats',
+        duration_minutes: 2,
+        instructions: 'Move slowly within a comfortable range.'
+      },
+      {
+        activity: 'Easy movement rehearsal',
+        duration_minutes: 2,
+        instructions: 'Rehearse the movements planned for this session without added load.'
+      }
+    ];
+
+    const cooldown = [
+      {
+        activity: 'Slow walking and breathing',
+        duration_minutes: 2,
+        instructions: 'Gradually reduce your pace and breathe normally.'
+      },
+      {
+        activity: 'Gentle stretching',
+        duration_minutes: 3,
+        instructions: 'Stretch comfortably. Do not force a range of motion or stretch through pain.'
+      }
+    ];
+
+    // Estimate exercise time using prescribed reps, sets, and rest.
+    const exerciseCount = dayExercises.length;
+
+    const estimatedExerciseMinutes = dayExercises.reduce(
+      (total, exercise) => {
+        const repMatch = String(exercise.reps).match(/\d+/);
+        const repsPerSet = repMatch
+          ? Number(repMatch[0])
+          : 10;
+
+        const secondsPerSet = Math.max(
+          30,
+          repsPerSet * 3
+        );
+
+        const workMinutes =
+          (exercise.sets * secondsPerSet) / 60;
+
+        const restMinutes =
+          (
+            Math.max(0, exercise.sets - 1) *
+            exercise.rest_seconds
+          ) / 60;
+
+        return total + workMinutes + restMinutes;
+      },
+      0
+    );
+
+    const transitionMinutes = Math.max(
+      0,
+      exerciseCount - 1
+    );
+
+    const estimatedDuration = Math.ceil(
+      13 +
+      estimatedExerciseMinutes +
+      transitionMinutes
+    );
+
+    return {
+      day: index + 1,
+      label: template.label,
+      focus: template.focus,
+      session_duration_minutes: sessionDuration,
+      estimated_duration_minutes: Math.min(
+        estimatedDuration,
+        sessionDuration
+      ),
+      warmup,
+      exercises: dayExercises,
+      cooldown,
+      exercise_count: exerciseCount,
+      note: exerciseCount === 0
+        ? 'No matching exercises were found for this day. Review the exercise catalog and equipment assessment.'
+        : 'Complete the warm-up first. Perform each exercise with controlled technique and take the prescribed rest between sets.'
+    };
+  });
+
+  // 9. Check whether the dataset could fill every training day.
+  const daysWithoutExercises = weeklySchedule.filter(
+    (day) => day.exercises.length === 0
+  );
+
+  if (daysWithoutExercises.length > 0) {
+    throw new Error(
+      `The exercise catalog does not contain enough eligible movements for Workout Day(s) ${daysWithoutExercises.map((day) => day.day).join(', ')}. Review the equipment labels, exercise instructions, and muscle-group data before generating this plan.`
+    );
+  }
+
+  // 10. Collect unique assigned exercises.
+  const assignedExercises = weeklySchedule.flatMap(
+    (day) => day.exercises
+  );
+
+  const strengthExercises = assignedExercises.filter((exercise) => {
+    return !['abdominals', 'core'].includes(
+      normalize(exercise.muscle_group)
+    );
+  });
+
+  const coreExercises = assignedExercises.filter((exercise) => {
+    return ['abdominals', 'core'].includes(
+      normalize(exercise.muscle_group)
+    );
+  });
+
+  // 11. Return the complete plan.
+  return {
+    goal: goalType,
+
+    weekly_focus: isBulk
+      ? 'strength + volume'
+      : isCut
+        ? 'balanced strength training'
+        : 'balanced fitness',
+
+    training_frequency: workoutDays,
+
+    session_duration_minutes: sessionDuration,
+
+    assessment: {
+      training_experience: assessment.training_experience,
+      training_age_months: assessment.training_age_months,
+      workout_days_per_week: assessment.workout_days_per_week,
+      session_duration_minutes: assessment.session_duration_minutes,
+      available_equipment: assessment.available_equipment,
+      has_injuries: assessment.has_injuries,
+      injured_body_parts: assessment.injured_body_parts,
+      activity_level: assessment.activity_level
+    },
+
+    progression: {
+      current_level: progression.currentLevel,
+      allowed_difficulty: progression.allowed,
+      next_level: progression.nextLevel,
+      unlocked: progression.unlocked,
+      training_days_last_28_days: progressionData.trainingDays,
+      successful_beginner_logs: progressionData.successfulLogs.beginner,
+      successful_intermediate_logs: progressionData.successfulLogs.intermediate,
+      successful_advanced_logs: progressionData.successfulLogs.advanced,
+      message: progression.message,
+      progression_note: 'Progression unlocks are system rules based on recent workout logs, not a medical or scientifically validated readiness assessment.'
+    },
+
+    weekly_schedule: weeklySchedule,
+
+    recommendations: [
+      {
+        focus: 'Strength Training',
+        reason: 'Exercises assigned to the planned training days.',
+        exercises: strengthExercises
+      },
+      {
+        focus: 'Core Training',
+        reason: 'Core exercises assigned to the planned training days.',
+        exercises: coreExercises
+      }
+    ],
+
+    total_unique_exercises: assignedExercises.length,
+
+    safety_notice: assessment.has_injuries
+      ? 'Some muscle groups were excluded based on the injury areas selected. The exercise dataset does not contain complete medical contraindication information. These exclusions do not establish that the remaining exercises are medically safe. Seek qualified professional guidance before exercising with an injury.'
+      : 'General fitness recommendations only. Warm up before training, use controlled technique, and stop if you experience pain, dizziness, or unusual symptoms.'
+  };
+};
+
+// ======================
+// WORKOUT PLAN
+// ======================
+
+const generateWorkoutPlan = async (userId) => {
+  return recommendWorkouts(userId);
+};
+
+// ======================
+// EXPORTS
+// ======================
+
+module.exports = {
+  getAllExercises,
+  getExerciseById,
+  createExercise,
+  updateExercise,
+  deleteExercise,
+  generateWorkoutPlan,
+  logWorkout,
+  getMyWorkoutLogs,
+  getAdminWorkoutLogs,
+  countWorkoutsToday,
+  recommendWorkouts
+};

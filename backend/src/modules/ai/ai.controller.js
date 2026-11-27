@@ -127,6 +127,7 @@ exports.chatWithAI = async (req, res) => {
         const macros = calculations?.macros || {};
         userContext = {
           ...userContext,
+          fullName: profile.full_name || null,
           age: profile.age ?? null,
           gender: profile.sex ?? null,
           heightCm: profile.height_cm ?? null,
@@ -222,6 +223,7 @@ exports.compareAI = async (req, res) => {
         const macros = calculations?.macros || {};
         userContext = {
           ...userContext,
+          fullName: profile.full_name || null,
           age: profile.age ?? null,
           gender: profile.sex ?? null,
           heightCm: profile.height_cm ?? null,

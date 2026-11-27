@@ -1,8 +1,17 @@
+
 const { Pool } = require('pg');
 require('dotenv').config();
 
-const required = ['DB_USER', 'DB_HOST', 'DB_NAME', 'DB_PASSWORD', 'DB_PORT'];
+const required = [
+  'DB_USER',
+  'DB_HOST',
+  'DB_NAME',
+  'DB_PASSWORD',
+  'DB_PORT'
+];
+
 const missing = required.filter((key) => !process.env[key]);
+
 if (missing.length > 0) {
   console.error('Missing required .env keys:', missing.join(', '));
   process.exit(1);
@@ -14,6 +23,10 @@ const pool = new Pool({
   database: process.env.DB_NAME,
   password: process.env.DB_PASSWORD,
   port: Number(process.env.DB_PORT) || 5432,
+
+  // Resolve unqualified table names across NutriFit schemas.
+  options:
+    '-c search_path=core,food_database,nutrition,fitness_tracking,workout,loyalty,ai,gym,engagement'
 });
 
 pool.on('connect', () => {

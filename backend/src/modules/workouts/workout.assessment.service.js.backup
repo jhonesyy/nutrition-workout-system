@@ -1,0 +1,242 @@
+
+const pool = require('../../config/db');
+
+const EXPERIENCE_LEVELS = ['beginner', 'intermediate', 'advanced'];
+
+const ACTIVITY_LEVELS = [
+  'sedentary',
+  'lightly_active',
+  'moderately_active',
+  'very_active',
+  'extra_active'
+];
+
+const toOptionalInteger = (value, field, min, max = Number.MAX_SAFE_INTEGER) => {
+  if (value === undefined || value === null || value === '') return null;
+
+  const number = Number(value);
+
+  if (!Number.isInteger(number) || number < min || number > max) {
+    throw new Error(`${field} must be an integer between ${min} and ${max}`);
+  }
+
+  return number;
+};
+
+const toOptionalString = (value, field, maxLength) => {
+  if (value === undefined || value === null || value === '') return null;
+
+  if (typeof value !== 'string') {
+    throw new Error(`${field} must be a string`);
+  }
+
+  const normalized = value.trim();
+
+  if (!normalized) return null;
+
+  if (normalized.length > maxLength) {
+    throw new Error(`${field} cannot exceed ${maxLength} characters`);
+  }
+
+  return normalized;
+};
+
+const toStringArray = (value, field) => {
+  if (value === undefined || value === null) return [];
+
+  if (!Array.isArray(value)) {
+    throw new Error(`${field} must be an array`);
+  }
+
+  return value.map((item) => {
+    if (typeof item !== 'string' || !item.trim()) {
+      throw new Error(`${field} must contain non-empty strings`);
+    }
+
+    return item.trim();
+  });
+};
+
+const getWorkoutAssessment = async (userId) => {
+  const result = await pool.query(
+    `SELECT *
+     FROM workout.user_workout_assessments
+     WHERE user_id = $1`,
+    [userId]
+  );
+
+  return result.rows[0] || null;
+};
+
+const saveWorkoutAssessment = async (userId, data) => {
+  const trainingExperience = toOptionalString(
+    data.training_experience,
+    'training_experience',
+    30
+  );
+
+  const trainingAgeMonths = toOptionalInteger(
+    data.training_age_months,
+    'training_age_months',
+    0
+  );
+
+  const workoutDays = toOptionalInteger(
+    data.workout_days_per_week,
+    'workout_days_per_week',
+    2,
+    6
+  );
+
+  const sessionDuration = toOptionalInteger(
+    data.session_duration_minutes,
+    'session_duration_minutes',
+    30,
+    120
+  );
+
+  const availableEquipment = toStringArray(
+    data.available_equipment,
+    'available_equipment'
+  );
+
+  let hasInjuries = data.has_injuries;
+
+  if (
+    hasInjuries !== undefined &&
+    hasInjuries !== null &&
+    typeof hasInjuries !== 'boolean'
+  ) {
+    throw new Error('has_injuries must be true or false');
+  }
+
+  if (hasInjuries === undefined) {
+    hasInjuries = null;
+  }
+
+  const injuredBodyParts = toStringArray(
+    data.injured_body_parts,
+    'injured_body_parts'
+  );
+
+  const injuryDetails = toOptionalString(
+    data.injury_details,
+    'injury_details',
+    5000
+  );
+
+  const activityLevel = toOptionalString(
+    data.activity_level,
+    'activity_level',
+    30
+  );
+
+  const workoutGoal = toOptionalString(
+    data.workout_goal,
+    'workout_goal',
+    100
+  );
+
+  if (
+    trainingExperience &&
+    !EXPERIENCE_LEVELS.includes(trainingExperience.toLowerCase())
+  ) {
+    throw new Error('Invalid training_experience');
+  }
+
+  if (
+    activityLevel &&
+    !ACTIVITY_LEVELS.includes(activityLevel.toLowerCase())
+  ) {
+    throw new Error('Invalid activity_level');
+  }
+
+  const normalizedExperience = trainingExperience?.toLowerCase() || null;
+  const normalizedActivity = activityLevel?.toLowerCase() || null;
+
+  const isComplete = Boolean(
+    normalizedExperience &&
+    trainingAgeMonths !== null &&
+    workoutDays !== null &&
+    sessionDuration !== null &&
+    availableEquipment.length > 0 &&
+    hasInjuries !== null &&
+    normalizedActivity &&
+    workoutGoal
+  );
+
+  const status = isComplete ? 'completed' : 'incomplete';
+
+  const result = await pool.query(
+    `INSERT INTO workout.user_workout_assessments (
+       user_id,
+       training_experience,
+       training_age_months,
+       workout_days_per_week,
+       session_duration_minutes,
+       available_equipment,
+       has_injuries,
+       injured_body_parts,
+       injury_details,
+       activity_level,
+       workout_goal,
+       assessment_status,
+       completed_at,
+       updated_at
+     )
+     VALUES (
+       $1::integer,
+       $2::varchar(30),
+       $3::integer,
+       $4::integer,
+       $5::integer,
+       $6::text[],
+       $7::boolean,
+       $8::text[],
+       $9::text,
+       $10::varchar(30),
+       $11::varchar(100),
+       $12::varchar(20),
+       $13::timestamptz,
+       NOW()
+     )
+     ON CONFLICT (user_id)
+     DO UPDATE SET
+       training_experience = EXCLUDED.training_experience,
+       training_age_months = EXCLUDED.training_age_months,
+       workout_days_per_week = EXCLUDED.workout_days_per_week,
+       session_duration_minutes = EXCLUDED.session_duration_minutes,
+       available_equipment = EXCLUDED.available_equipment,
+       has_injuries = EXCLUDED.has_injuries,
+       injured_body_parts = EXCLUDED.injured_body_parts,
+       injury_details = EXCLUDED.injury_details,
+       activity_level = EXCLUDED.activity_level,
+       workout_goal = EXCLUDED.workout_goal,
+       assessment_status = EXCLUDED.assessment_status,
+       completed_at = EXCLUDED.completed_at,
+       updated_at = NOW()
+     RETURNING *`,
+    [
+      userId,
+      normalizedExperience,
+      trainingAgeMonths,
+      workoutDays,
+      sessionDuration,
+      availableEquipment,
+      hasInjuries,
+      injuredBodyParts,
+      injuryDetails,
+      normalizedActivity,
+      workoutGoal,
+      status,
+      isComplete ? new Date() : null
+    ]
+  );
+
+  return result.rows[0];
+};
+
+module.exports = {
+  getWorkoutAssessment,
+  saveWorkoutAssessment
+};

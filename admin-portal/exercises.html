@@ -1,10 +1,33 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Exercises | NutriFit Admin</title>
   <link rel="stylesheet" href="style.css" />
+  <style>
+    .video-cell { min-width: 220px; }
+    .video-preview {
+      width: 190px;
+      max-width: 100%;
+      border-radius: 8px;
+      background: #111;
+      display: block;
+      margin-bottom: 8px;
+    }
+    .video-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    .video-actions input { max-width: 190px; font-size: 12px; }
+    .video-status { font-size: 12px; margin-top: 5px; }
+    .btn-danger { color: #c62828; }
+    .table-wrap { overflow-x: auto; }
+    .upload-help { font-size: 12px; color: #666; margin-top: 8px; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+  </style>
 </head>
 <body>
   <div class="admin-layout">
@@ -19,15 +42,16 @@
         <a href="nutrition.html">Nutrition</a>
         <a href="meals.html">Meal Logs</a>
         <a href="exercises.html" class="active">Exercises</a>
+        <a href="mobility.html">Mobility Test</a>
         <a href="workouts-log.html">Workout Logs</a>
         <a href="loyalty.html">Loyalty & Rewards</a>
         <a href="analytics.html">Analytics</a>
         <a href="gym-settings.html">Gym Settings</a>
-        <a href="minigame.html">Minigame Quizzes</a>
         <a href="account.html">Account</a>
         <a href="index.html" class="logout" id="logoutBtn">Logout</a>
       </nav>
     </aside>
+
     <main class="main-content">
       <header class="topbar">
         <h1>Exercise Management</h1>
@@ -36,13 +60,16 @@
 
       <section class="content-card">
         <h2 id="formTitle">Add Exercise</h2>
+
         <form id="exerciseForm">
           <input type="hidden" id="exerciseId" />
+
           <div class="form-row">
             <input type="text" id="name" placeholder="Exercise name" required />
             <input type="text" id="muscle_group" placeholder="Muscle group" />
             <input type="text" id="equipment" placeholder="Equipment" />
           </div>
+
           <div class="form-row">
             <select id="difficulty">
               <option value="">Difficulty</option>
@@ -50,66 +77,137 @@
               <option value="Intermediate">Intermediate</option>
               <option value="Advanced">Advanced</option>
             </select>
+
             <input type="number" id="default_sets" placeholder="Default sets" min="1" />
             <input type="text" id="default_reps" placeholder="Default reps (e.g. 8-12)" />
-            <button type="submit" class="btn btn-dark" id="submitBtn">Add Exercise</button>
-            <button type="button" class="btn" id="cancelEditBtn" style="display:none;">Cancel</button>
+
+            <button type="submit" class="btn btn-dark" id="submitBtn">
+              Add Exercise
+            </button>
+
+            <button type="button" class="btn" id="cancelEditBtn" style="display:none;">
+              Cancel
+            </button>
           </div>
         </form>
+
         <p id="formMsg" style="margin-top:8px;font-size:13px;"></p>
       </section>
 
       <section class="content-card">
         <h2>Exercise List</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Name</th>
-              <th>Muscle Group</th>
-              <th>Equipment</th>
-              <th>Difficulty</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody id="exerciseTableBody">
-            <tr><td colspan="6">Loading...</td></tr>
-          </tbody>
-        </table>
+        <p class="upload-help">
+          Exercise videos: MP4, MOV, or WebM. Maximum file size: 100 MB.
+          Uploading a new video replaces the existing video.
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Muscle Group</th>
+                <th>Equipment</th>
+                <th>Difficulty</th>
+                <th>Exercise Video</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="exerciseTableBody">
+              <tr><td colspan="7">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
       </section>
     </main>
   </div>
 
   <script>
-    // SMART API SWITCHING
-    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    const API_BASE = isLocalhost 
-      ? 'http://localhost:5000/api' 
+    // API CONFIGURATION
+    const isLocalhost =
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1';
+
+    const API_BASE = isLocalhost
+      ? 'http://localhost:5000/api'
       : 'https://nutrition-workout-system-production.up.railway.app/api';
 
     const token = localStorage.getItem('token');
     const user = JSON.parse(localStorage.getItem('user') || 'null');
 
-    if (!token || !user || !['admin', 'super_admin', 'gym_manager'].includes(user.role)) {
+    if (
+      !token ||
+      !user ||
+      !['admin', 'super_admin', 'gym_manager'].includes(user.role)
+    ) {
       window.location.href = 'index.html';
     }
-    
-    document.getElementById('adminInfo').textContent = (user.full_name || user.email) + ' | ' + user.role;
 
-    document.getElementById('logoutBtn').addEventListener('click', (e) => {
-      e.preventDefault();
+    document.getElementById('adminInfo').textContent =
+      (user.full_name || user.email) + ' | ' + user.role;
+
+    document.getElementById('logoutBtn').addEventListener('click', (event) => {
+      event.preventDefault();
       localStorage.clear();
       window.location.href = 'index.html';
     });
 
+    const exerciseTableBody = document.getElementById('exerciseTableBody');
+
+    // Keep the actual exercise objects here.
+    const exercisesById = new Map();
+
     function authHeaders() {
-      return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
+      return {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token
+      };
     }
 
-    function showMsg(text, isError = false) {
-      const el = document.getElementById('formMsg');
-      el.textContent = text;
-      el.style.color = isError ? '#c62828' : '#2e7d32';
+    // FormData must NOT have a manually assigned Content-Type.
+    function uploadHeaders() {
+      return {
+        'Authorization': 'Bearer ' + token
+      };
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (character) => {
+        const entities = {
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#39;'
+        };
+
+        return entities[character];
+      });
+    }
+
+    async function readResponse(response) {
+      const text = await response.text();
+
+      let data = {};
+
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = { message: text || 'Invalid server response.' };
+      }
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Request failed.');
+      }
+
+      return data;
+    }
+
+    function showMsg(message, isError = false) {
+      const element = document.getElementById('formMsg');
+      element.textContent = message;
+      element.style.color = isError ? '#c62828' : '#2e7d32';
     }
 
     function resetForm() {
@@ -121,95 +219,378 @@
       showMsg('');
     }
 
-    async function loadExercises() {
-      const tbody = document.getElementById('exerciseTableBody');
-      try {
-        const res = await fetch(API_BASE + '/workouts/exercises', { headers: authHeaders() });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || 'Failed to load');
+    function renderExercise(exercise) {
+      const id = Number(exercise.id);
+      const videoUrl = exercise.video_url || '';
 
-        const list = Array.isArray(data) ? data : (data.exercises || data);
-        if (!list || !list.length) {
-          tbody.innerHTML = '<tr><td colspan="6">No exercises found</td></tr>';
+      const videoHtml = videoUrl
+        ? `
+          <video class="video-preview" controls preload="metadata">
+            <source src="${escapeHtml(videoUrl)}">
+            Your browser does not support video playback.
+          </video>
+          <div class="video-status">Video uploaded</div>
+        `
+        : `
+          <div class="video-status">No video uploaded</div>
+        `;
+
+      return `
+        <tr>
+          <td>${id}</td>
+          <td>${escapeHtml(exercise.name || '')}</td>
+          <td>${escapeHtml(exercise.muscle_group || '-')}</td>
+          <td>${escapeHtml(exercise.equipment || '-')}</td>
+          <td>${escapeHtml(exercise.difficulty || '-')}</td>
+
+          <td class="video-cell">
+            ${videoHtml}
+
+            <div class="video-actions">
+              <input
+                type="file"
+                id="video-file-${id}"
+                accept="video/mp4,video/quicktime,video/webm"
+              />
+
+              <button
+                type="button"
+                class="btn btn-dark"
+                data-action="upload-video"
+                data-id="${id}"
+              >
+                ${videoUrl ? 'Replace Video' : 'Upload Video'}
+              </button>
+
+              ${
+                videoUrl
+                  ? `<button
+                       type="button"
+                       class="btn btn-danger"
+                       data-action="delete-video"
+                       data-id="${id}"
+                     >Delete Video</button>`
+                  : ''
+              }
+            </div>
+
+            <div class="video-status" id="video-status-${id}"></div>
+          </td>
+
+          <td>
+            <button
+              type="button"
+              class="btn"
+              data-action="edit"
+              data-id="${id}"
+            >Edit</button>
+
+            <button
+              type="button"
+              class="btn btn-danger"
+              data-action="delete-exercise"
+              data-id="${id}"
+              style="margin-left:4px;"
+            >Delete</button>
+          </td>
+        </tr>
+      `;
+    }
+
+    async function loadExercises() {
+      exerciseTableBody.innerHTML =
+        '<tr><td colspan="7">Loading exercises...</td></tr>';
+
+      try {
+        const response = await fetch(
+          API_BASE + '/workouts/exercises',
+          { headers: authHeaders() }
+        );
+
+        const data = await readResponse(response);
+
+        const list = Array.isArray(data)
+          ? data
+          : (data.exercises || []);
+
+        exercisesById.clear();
+
+        if (!list.length) {
+          exerciseTableBody.innerHTML =
+            '<tr><td colspan="7">No exercises found.</td></tr>';
           return;
         }
 
-        tbody.innerHTML = list.map(ex => `
+        list.forEach((exercise) => {
+          exercisesById.set(Number(exercise.id), exercise);
+        });
+
+        exerciseTableBody.innerHTML = list.map(renderExercise).join('');
+
+      } catch (error) {
+        exerciseTableBody.innerHTML = `
           <tr>
-            <td>${ex.id}</td>
-            <td>${ex.name || ''}</td>
-            <td>${ex.muscle_group || '-'}</td>
-            <td>${ex.equipment || '-'}</td>
-            <td>${ex.difficulty || '-'}</td>
-            <td>
-              <button class="btn" onclick='editExercise(${JSON.stringify(ex).replace(/'/g, "&apos;")})'>Edit</button>
-              <button class="btn" onclick="deleteExercise(${ex.id})" style="margin-left:4px;color:#c62828;">Delete</button>
+            <td colspan="7" style="color:#c62828;">
+              ${escapeHtml(error.message)}
             </td>
           </tr>
-        `).join('');
-      } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="6" style="color:#c62828;">${err.message}</td></tr>`;
+        `;
       }
     }
 
-    document.getElementById('exerciseForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
+    // ADD / UPDATE EXERCISE
+    document.getElementById('exerciseForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+
       const id = document.getElementById('exerciseId').value;
+
       const payload = {
         name: document.getElementById('name').value.trim(),
-        muscle_group: document.getElementById('muscle_group').value.trim() || null,
-        equipment: document.getElementById('equipment').value.trim() || null,
-        difficulty: document.getElementById('difficulty').value || null,
-        default_sets: Number(document.getElementById('default_sets').value) || null,
-        default_reps: document.getElementById('default_reps').value.trim() || null
+        muscle_group:
+          document.getElementById('muscle_group').value.trim() || null,
+        equipment:
+          document.getElementById('equipment').value.trim() || null,
+        difficulty:
+          document.getElementById('difficulty').value || null,
+        default_sets:
+          Number(document.getElementById('default_sets').value) || null,
+        default_reps:
+          document.getElementById('default_reps').value.trim() || null
       };
 
+      const submitButton = document.getElementById('submitBtn');
+      submitButton.disabled = true;
+
       try {
-        const url = id ? `${API_BASE}/workouts/exercises/${id}` : `${API_BASE}/workouts/exercises`;
-        const method = id ? 'PUT' : 'POST';
-        const res = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(payload) });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || 'Failed');
-        showMsg(id ? 'Exercise updated' : 'Exercise added');
+        const url = id
+          ? `${API_BASE}/workouts/exercises/${id}`
+          : `${API_BASE}/workouts/exercises`;
+
+        const response = await fetch(url, {
+          method: id ? 'PUT' : 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify(payload)
+        });
+
+        await readResponse(response);
+
+        showMsg(id ? 'Exercise updated successfully.' : 'Exercise added successfully.');
         resetForm();
-        loadExercises();
-      } catch (err) {
-        showMsg(err.message, true);
+        await loadExercises();
+
+      } catch (error) {
+        showMsg(error.message, true);
+      } finally {
+        submitButton.disabled = false;
       }
     });
 
-    window.editExercise = function(ex) {
-      document.getElementById('exerciseId').value = ex.id;
-      document.getElementById('name').value = ex.name || '';
-      document.getElementById('muscle_group').value = ex.muscle_group || '';
-      document.getElementById('equipment').value = ex.equipment || '';
-      document.getElementById('difficulty').value = ex.difficulty || '';
-      document.getElementById('default_sets').value = ex.default_sets || '';
-      document.getElementById('default_reps').value = ex.default_reps || '';
+    // EDIT EXERCISE
+    function editExercise(id) {
+      const exercise = exercisesById.get(Number(id));
+
+      if (!exercise) {
+        alert('Exercise not found. Reload the exercise list.');
+        return;
+      }
+
+      document.getElementById('exerciseId').value = exercise.id;
+      document.getElementById('name').value = exercise.name || '';
+      document.getElementById('muscle_group').value = exercise.muscle_group || '';
+      document.getElementById('equipment').value = exercise.equipment || '';
+      document.getElementById('difficulty').value = exercise.difficulty || '';
+      document.getElementById('default_sets').value = exercise.default_sets || '';
+      document.getElementById('default_reps').value = exercise.default_reps || '';
+
       document.getElementById('formTitle').textContent = 'Edit Exercise';
       document.getElementById('submitBtn').textContent = 'Update Exercise';
       document.getElementById('cancelEditBtn').style.display = 'inline-block';
+
       window.scrollTo({ top: 0, behavior: 'smooth' });
-    };
+    }
 
     document.getElementById('cancelEditBtn').addEventListener('click', resetForm);
 
-    window.deleteExercise = async function(id) {
+    // DELETE EXERCISE
+    async function deleteExercise(id) {
       if (!confirm('Delete this exercise?')) return;
+
       try {
-        const res = await fetch(`${API_BASE}/workouts/exercises/${id}`, {
-          method: 'DELETE',
-          headers: authHeaders()
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || 'Delete failed');
-        loadExercises();
-      } catch (err) {
-        alert(err.message);
+        const response = await fetch(
+          `${API_BASE}/workouts/exercises/${id}`,
+          {
+            method: 'DELETE',
+            headers: authHeaders()
+          }
+        );
+
+        await readResponse(response);
+
+        alert('Exercise deleted.');
+        await loadExercises();
+
+      } catch (error) {
+        alert(error.message);
       }
-    };
+    }
+
+    // UPLOAD / REPLACE EXERCISE VIDEO
+    async function uploadExerciseVideo(id) {
+      const fileInput = document.getElementById(`video-file-${id}`);
+      const status = document.getElementById(`video-status-${id}`);
+      const file = fileInput?.files?.[0];
+
+      if (!file) {
+        alert('Select a video first.');
+        return;
+      }
+
+      const allowedTypes = [
+        'video/mp4',
+        'video/quicktime',
+        'video/webm'
+      ];
+
+      if (!allowedTypes.includes(file.type)) {
+        alert('Only MP4, MOV, and WebM videos are allowed.');
+        fileInput.value = '';
+        return;
+      }
+
+      const maxSize = 100 * 1024 * 1024;
+
+      if (file.size > maxSize) {
+        alert('Video exceeds the 100 MB upload limit.');
+        fileInput.value = '';
+        return;
+      }
+
+      const exercise = exercisesById.get(Number(id));
+
+      if (!exercise) {
+        alert('Exercise not found.');
+        return;
+      }
+
+      const confirmed = confirm(
+        exercise.video_url
+          ? `Replace the existing video for "${exercise.name}"?`
+          : `Upload a video for "${exercise.name}"?`
+      );
+
+      if (!confirmed) return;
+
+      const button = document.querySelector(
+        `[data-action="upload-video"][data-id="${id}"]`
+      );
+
+      const formData = new FormData();
+      formData.append('video', file);
+
+      button.disabled = true;
+      status.textContent = 'Uploading video to Cloudinary...';
+      status.style.color = '#555';
+
+      try {
+        const response = await fetch(
+          `${API_BASE}/workouts/exercises/${id}/video`,
+          {
+            method: 'PUT',
+            headers: uploadHeaders(),
+            body: formData
+          }
+        );
+
+        const data = await readResponse(response);
+
+        status.textContent = data.message || 'Video uploaded successfully.';
+        status.style.color = '#2e7d32';
+
+        fileInput.value = '';
+
+        await loadExercises();
+
+      } catch (error) {
+        status.textContent = error.message;
+        status.style.color = '#c62828';
+        button.disabled = false;
+      }
+    }
+
+    // DELETE EXERCISE VIDEO ONLY
+    async function deleteExerciseVideo(id) {
+      const exercise = exercisesById.get(Number(id));
+
+      if (!exercise || !exercise.video_url) {
+        alert('This exercise has no uploaded video.');
+        return;
+      }
+
+      if (!confirm(`Delete the video for "${exercise.name}"? The exercise itself will remain.`)) {
+        return;
+      }
+
+      const status = document.getElementById(`video-status-${id}`);
+
+      const button = document.querySelector(
+        `[data-action="delete-video"][data-id="${id}"]`
+      );
+
+      if (button) button.disabled = true;
+
+      if (status) {
+        status.textContent = 'Deleting video...';
+        status.style.color = '#555';
+      }
+
+      try {
+        const response = await fetch(
+          `${API_BASE}/workouts/exercises/${id}/video`,
+          {
+            method: 'DELETE',
+            headers: authHeaders()
+          }
+        );
+
+        const data = await readResponse(response);
+
+        alert(data.message || 'Exercise video deleted.');
+        await loadExercises();
+
+      } catch (error) {
+        alert(error.message);
+        if (button) button.disabled = false;
+      }
+    }
+
+    // TABLE ACTION HANDLER
+    exerciseTableBody.addEventListener('click', async (event) => {
+      const button = event.target.closest('button[data-action]');
+
+      if (!button) return;
+
+      const id = Number(button.dataset.id);
+      const action = button.dataset.action;
+
+      if (action === 'edit') {
+        editExercise(id);
+      }
+
+      if (action === 'delete-exercise') {
+        await deleteExercise(id);
+      }
+
+      if (action === 'upload-video') {
+        await uploadExerciseVideo(id);
+      }
+
+      if (action === 'delete-video') {
+        await deleteExerciseVideo(id);
+      }
+    });
 
     loadExercises();
   </script>
 </body>
 </html>
+

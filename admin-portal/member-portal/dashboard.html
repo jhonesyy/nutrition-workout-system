@@ -17,19 +17,19 @@
       <div class="grid">
         <div class="card">
           <h3>Calories Target</h3>
-          <div class="stat-value" id="statCalories">—</div>
+          <div class="stat-value" id="statCalories">â€”</div>
         </div>
         <div class="card">
           <h3>Steps Today</h3>
-          <div class="stat-value" id="statSteps">—</div>
+          <div class="stat-value" id="statSteps">â€”</div>
         </div>
         <div class="card">
           <h3>Active kcal</h3>
-          <div class="stat-value" id="statActive">—</div>
+          <div class="stat-value" id="statActive">â€”</div>
         </div>
         <div class="card">
           <h3>Loyalty pts</h3>
-          <div class="stat-value" id="statLoyalty">—</div>
+          <div class="stat-value" id="statLoyalty">â€”</div>
         </div>
       </div>
 
@@ -37,17 +37,16 @@
         <h2>Today's Nutrition</h2>
         <div class="muted" id="nutritionStatus">Loading...</div>
         <div class="progress"><span id="barCalories" style="width:0%"></span></div>
-        <div class="muted" id="nutritionText">—</div>
+        <div class="muted" id="nutritionText">â€”</div>
       </div>
 
       <div class="card">
         <h2>Health Sync Status</h2>
         <p class="muted">
-          Browsers cannot read Apple HealthKit or Google Health Connect.
-          Use <a href="health.html">Health Sync</a> for manual entry, or the
-          NutriFit mobile app to push device data into the same API.
+          Activity tracking is manual. Enter your daily steps and active calories
+          on the <a href="health.html">Health Sync</a> page.
         </p>
-        <div class="stat-value" id="syncStatus" style="font-size:1.2rem; margin-top:8px;">Not connected</div>
+        <div class="stat-value" id="syncStatus" style="font-size:1.2rem; margin-top:8px;">Manual entry available</div>
       </div>
     </main>
   </div>
@@ -60,7 +59,7 @@
 
     function setText(id, val) {
       const el = document.getElementById(id);
-      if (el) el.textContent = val ?? '—';
+      if (el) el.textContent = val ?? 'â€”';
     }
 
     async function loadDashboard() {
@@ -68,17 +67,17 @@
       try {
         const tdee = await apiGet('/users/tdee');
         const target = tdee?.calculations?.target_calories ?? tdee?.target_calories ?? tdee?.tdee;
-        setText('statCalories', target ? Math.round(target) : '—');
+        setText('statCalories', target ? Math.round(target) : 'â€”');
       } catch { 
-        setText('statCalories', '—'); 
+        setText('statCalories', 'â€”'); 
       }
 
       // 2. Loyalty points
       try {
         const loyalty = await apiGet('/loyalty/points');
-        setText('statLoyalty', loyalty?.total_points ?? loyalty?.points ?? '—');
+        setText('statLoyalty', loyalty?.total_points ?? loyalty?.points ?? 'â€”');
       } catch { 
-        setText('statLoyalty', '—'); 
+        setText('statLoyalty', 'â€”'); 
       }
 
       // 3. Today's meals (nutrition) - FIXED: reads 'consumed' and 'targets' objects
@@ -94,7 +93,7 @@
         
         document.getElementById('nutritionStatus').textContent = 'Meals logged today';
         document.getElementById('nutritionText').textContent = 
-          `${Math.round(cal)} kcal · P ${Math.round(p)}g · C ${Math.round(c)}g · F ${Math.round(f)}g`;
+          `${Math.round(cal)} kcal  |  P ${Math.round(p)}g  |  C ${Math.round(c)}g  |  F ${Math.round(f)}g`;
         
         const target = Number(targets.calories) || 2000;
         const pct = target ? Math.min(100, Math.round((cal / target) * 100)) : 0;
@@ -104,12 +103,35 @@
         document.getElementById('nutritionStatus').textContent = 'Could not load nutrition';
       }
 
-      // 4. Steps / active kcal (device data not available in browser)
-      setText('statSteps', '—');
-      setText('statActive', '—');
+      // 4. Today's health activity
+      try {
+        const activity = await apiGet('/health/today') || {};
+        setText('statSteps', Number(activity.steps) || 0);
+        setText('statActive', Number(activity.active_calories) || 0);
+      } catch (error) {
+        console.error('Health activity error:', error);
+        setText('statSteps', 0);
+        setText('statActive', 0);
+      }
     }
 
-    loadDashboard();
+    async function startDashboard() {
+      try {
+        const nextStep = await getOnboardingNextStep();
+
+        if (nextStep) {
+          window.location.replace(nextStep);
+          return;
+        }
+
+        loadDashboard();
+      } catch (error) {
+        console.error('Onboarding check error:', error);
+        loadDashboard();
+      }
+    }
+
+    startDashboard();
   </script>
 </body>
 </html>

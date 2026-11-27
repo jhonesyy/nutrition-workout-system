@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -20,11 +20,11 @@
         <a href="nutrition.html">Nutrition</a>
         <a href="meals.html">Meal Logs</a>
         <a href="exercises.html">Exercises</a>
+        <a href="mobility.html">Mobility Test</a>
         <a href="workouts-log.html">Workout Logs</a>
         <a href="loyalty.html" class="active">Loyalty & Rewards</a>
         <a href="analytics.html">Analytics</a>
         <a href="gym-settings.html">Gym Settings</a>
-        <a href="minigame.html">Minigame Quizzes</a>
         <a href="account.html">Account</a>
         <a href="index.html" class="logout" id="logoutBtn">Logout</a>
       </nav>
@@ -144,7 +144,7 @@
         const active = list.filter(r => r.is_active !== false);
 
         if (!active.length) {
-          select.innerHTML = '<option value="">No active rewards — add some in Gym Settings</option>';
+          select.innerHTML = '<option value="">No active rewards â€” add some in Gym Settings</option>';
         } else {
           select.innerHTML = '<option value="">Select a reward...</option>' +
             active.map(r => `<option value="${r.id}">${r.name} (${r.points_required} pts)</option>`).join('');

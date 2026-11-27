@@ -1,55 +1,28 @@
-const fs = require('fs');
-const path = require('path');
+
+require('dotenv').config();
 
 const app = require('./app');
 const pool = require('./config/db');
 const bcrypt = require('bcrypt');
 
 const PORT = process.env.PORT || 5000;
-
 const SALT_ROUNDS = 10;
-
-const SQL_FILES = [
-  path.join(__dirname, '../sql/schema.sql'),
-  path.join(__dirname, '../sql/gym_settings.sql'),
-  path.join(__dirname, '../sql/workout_logs.sql'),
-  path.join(__dirname, '../sql/meal_logs_custom_migration.sql')
-];
-
-const initializeDatabase = async () => {
-  console.log('Initializing database...');
-
-  for (const sqlFile of SQL_FILES) {
-    const fileName = path.basename(sqlFile);
-
-    try {
-      const sql = fs.readFileSync(sqlFile, 'utf8');
-
-      console.log(`Running ${fileName}...`);
-
-      await pool.query(sql);
-
-      console.log(`${fileName} completed successfully`);
-    } catch (error) {
-      console.error(`Failed to run ${fileName}:`, error.message);
-      throw error;
-    }
-  }
-
-  console.log('Database initialization completed successfully');
-};
 
 const seedAdmin = async () => {
   const email = process.env.SEED_ADMIN_EMAIL;
   const password = process.env.SEED_ADMIN_PASSWORD;
 
   if (!email || !password) {
-    console.log('SEED_ADMIN_EMAIL or SEED_ADMIN_PASSWORD not configured. Skipping admin seed.');
+    console.log(
+      'SEED_ADMIN_EMAIL or SEED_ADMIN_PASSWORD not configured. Skipping admin seed.'
+    );
     return;
   }
 
   const existingAdmin = await pool.query(
-    `SELECT id FROM users WHERE role IN ('admin', 'super_admin') LIMIT 1`
+    `SELECT id FROM users
+     WHERE role IN ('admin', 'super_admin')
+     LIMIT 1`
   );
 
   if (existingAdmin.rows.length > 0) {
@@ -83,16 +56,22 @@ const seedAdmin = async () => {
 
 const startServer = async () => {
   try {
-    await pool.query('SELECT NOW()');
+    const result = await pool.query(`
+      SELECT
+        current_database() AS database_name,
+        current_schema() AS current_schema,
+        current_setting('search_path') AS search_path
+    `);
 
     console.log('Database connection successful');
-
-    await initializeDatabase();
+    console.log('Database:', result.rows[0].database_name);
+    console.log('Current schema:', result.rows[0].current_schema);
+    console.log('Search path:', result.rows[0].search_path);
 
     await seedAdmin();
 
     app.listen(PORT, () => {
-      console.log(`Server is running on port ${PORT}`);
+      console.log(`Server is running on http://localhost:${PORT}`);
     });
   } catch (error) {
     console.error('Failed to start server:', error.message);

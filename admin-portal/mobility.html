@@ -1,0 +1,493 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mobility Test | NutriFit Admin</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .mobility-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+    }
+    .mobility-grid input,
+    .mobility-grid textarea {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ccc;
+      font: inherit;
+    }
+    .mobility-grid textarea {
+      min-height: 85px;
+      resize: vertical;
+    }
+    .mobility-table-wrap { overflow-x: auto; }
+    .mobility-table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 850px;
+    }
+    .mobility-table th,
+    .mobility-table td {
+      padding: 12px;
+      border-bottom: 1px solid #ddd;
+      text-align: left;
+      vertical-align: top;
+    }
+    .mobility-table th { background: #f5f5f5; }
+    .mobility-video {
+      width: 180px;
+      max-width: 100%;
+      display: block;
+      margin-bottom: 8px;
+      background: #111;
+      border-radius: 6px;
+    }
+    .mobility-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    .mobility-actions input { max-width: 190px; }
+    .mobility-status { font-size: 12px; margin-top: 5px; }
+    .mobility-help { color: #666; font-size: 13px; }
+    .mobility-checkbox { margin: 14px 0; }
+    .mobility-checkbox label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .mobility-checkbox input { width: auto; }
+    .btn-danger { color: #c62828; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <div class="admin-layout">
+    <aside class="sidebar">
+      <div class="logo">
+        <h2>NutriFit</h2>
+        <span>Admin Portal</span>
+      </div>
+      <nav>
+        <a href="dashboard.html">Dashboard</a>
+        <a href="users.html">Users</a>
+        <a href="nutrition.html">Nutrition</a>
+        <a href="meals.html">Meal Logs</a>
+        <a href="exercises.html">Exercises</a>
+        <a href="mobility.html" class="active">Mobility Test</a>
+        <a href="workouts-log.html">Workout Logs</a>
+        <a href="loyalty.html">Loyalty & Rewards</a>
+        <a href="analytics.html">Analytics</a>
+        <a href="gym-settings.html">Gym Settings</a>
+        <a href="account.html">Account</a>
+        <a href="index.html" class="logout" id="logoutBtn">Logout</a>
+      </nav>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <h1>Mobility Test Management</h1>
+        <div class="admin-info" id="adminInfo">Admin</div>
+      </header>
+
+      <section class="content-card">
+        <h2 id="formTitle">Add Mobility Movement</h2>
+
+        <form id="movementForm">
+          <input type="hidden" id="movementId" />
+
+          <div class="mobility-grid">
+            <input id="movementKey" placeholder="Movement key (example: neck_rotation)" required />
+            <input id="movementName" placeholder="Movement name" required />
+            <input id="bodyArea" placeholder="Body area" required />
+            <input id="sortOrder" type="number" min="0" value="0" placeholder="Sort order" required />
+            <textarea id="description" placeholder="Description"></textarea>
+            <textarea id="instructions" placeholder="Instructions" required></textarea>
+            <textarea id="safetyNotes" placeholder="Safety notes"></textarea>
+          </div>
+
+          <div class="mobility-checkbox">
+            <label>
+              <input type="checkbox" id="isActive" checked />
+              Active — show this movement in the member mobility test
+            </label>
+          </div>
+
+          <button class="btn btn-dark" type="submit" id="saveButton">
+            Save Movement
+          </button>
+          <button class="btn" type="button" id="cancelButton" hidden>
+            Cancel Edit
+          </button>
+          <p id="formMessage" class="mobility-status"></p>
+        </form>
+      </section>
+
+      <section class="content-card">
+        <h2>Mobility Test Movement Library</h2>
+        <p class="mobility-help">
+          Manage the movements members complete during their mobility test.
+          Tutorial videos support MP4, MOV, and WebM, up to 100 MB.
+          Deactivating a movement hides it from new tests but preserves existing answers.
+        </p>
+
+        <div class="mobility-table-wrap">
+          <table class="mobility-table">
+            <thead>
+              <tr>
+                <th>Movement</th>
+                <th>Instructions</th>
+                <th>Order</th>
+                <th>Status</th>
+                <th>Tutorial Video</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="movementTableBody">
+              <tr><td colspan="6">Loading movements...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p id="listMessage" class="mobility-status"></p>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const isLocalhost =
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1';
+
+    const API_BASE = isLocalhost
+      ? 'http://localhost:5000/api'
+      : 'https://nutrition-workout-system-production.up.railway.app/api';
+
+    const token = localStorage.getItem('token');
+    const user = JSON.parse(localStorage.getItem('user') || 'null');
+
+    if (
+      !token ||
+      !user ||
+      !['admin', 'super_admin'].includes(user.role)
+    ) {
+      window.location.href = 'index.html';
+    }
+
+    document.getElementById('adminInfo').textContent =
+      (user.full_name || user.email) + ' | ' + user.role;
+
+    document.getElementById('logoutBtn').addEventListener('click', (event) => {
+      event.preventDefault();
+      localStorage.clear();
+      window.location.href = 'index.html';
+    });
+
+    const form = document.getElementById('movementForm');
+    const tableBody = document.getElementById('movementTableBody');
+    const formMessage = document.getElementById('formMessage');
+    const listMessage = document.getElementById('listMessage');
+    const saveButton = document.getElementById('saveButton');
+    const movementsById = new Map();
+
+    function authHeaders() {
+      return {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      };
+    }
+
+    function uploadHeaders() {
+      return {
+        'Authorization': 'Bearer ' + token
+      };
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (character) => {
+        const entities = {
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#39;'
+        };
+        return entities[character];
+      });
+    }
+
+    async function readResponse(response) {
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Request failed.');
+      }
+
+      return data;
+    }
+
+    async function loadMovements() {
+      tableBody.innerHTML =
+        '<tr><td colspan="6">Loading movements...</td></tr>';
+
+      try {
+        const response = await fetch(
+          API_BASE + '/workouts/admin/mobility-test/movements',
+          { headers: authHeaders() }
+        );
+
+        const data = await readResponse(response);
+        const movements = data.movements || [];
+
+        movementsById.clear();
+
+        movements.forEach((movement) => {
+          movementsById.set(Number(movement.id), movement);
+        });
+
+        if (!movements.length) {
+          tableBody.innerHTML =
+            '<tr><td colspan="6">No mobility movements found.</td></tr>';
+          return;
+        }
+
+        tableBody.innerHTML = movements.map(renderMovement).join('');
+      } catch (error) {
+        tableBody.innerHTML =
+          '<tr><td colspan="6">Unable to load movements.</td></tr>';
+        listMessage.textContent = error.message;
+      }
+    }
+
+    function renderMovement(movement) {
+      const id = Number(movement.id);
+
+      const video = movement.video_url
+        ? `
+          <video class="mobility-video" controls preload="metadata">
+            <source src="${escapeHtml(movement.video_url)}">
+          </video>
+          <div>${escapeHtml(movement.video_format || 'video')}</div>
+        `
+        : '<span>No tutorial video</span>';
+
+      const videoActions = `
+        <input
+          type="file"
+          id="video-${id}"
+          accept="video/mp4,video/quicktime,video/webm"
+        >
+        <button class="btn" data-action="upload-video" data-id="${id}">
+          ${movement.video_url ? 'Replace Video' : 'Upload Video'}
+        </button>
+        ${movement.video_url ? `
+          <button class="btn btn-danger" data-action="delete-video" data-id="${id}">
+            Delete Video
+          </button>
+        ` : ''}
+        <div class="mobility-status" id="video-status-${id}"></div>
+      `;
+
+      return `
+        <tr>
+          <td>
+            <strong>${escapeHtml(movement.name)}</strong><br>
+            <small>${escapeHtml(movement.movement_key)}</small><br>
+            <small>${escapeHtml(movement.body_area)}</small>
+          </td>
+          <td>
+            ${escapeHtml(movement.description || '')}<br><br>
+            <strong>Instructions:</strong><br>
+            ${escapeHtml(movement.instructions || '')}<br><br>
+            <strong>Safety:</strong><br>
+            ${escapeHtml(movement.safety_notes || 'No safety notes')}
+          </td>
+          <td>${escapeHtml(movement.sort_order)}</td>
+          <td>${movement.is_active ? 'Active' : 'Inactive'}</td>
+          <td>${video}${videoActions}</td>
+          <td>
+            <div class="mobility-actions">
+              <button class="btn" data-action="edit" data-id="${id}">Edit</button>
+              <button class="btn btn-danger" data-action="deactivate" data-id="${id}">
+                ${movement.is_active ? 'Deactivate' : 'Already Inactive'}
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }
+
+    function resetForm() {
+      form.reset();
+      document.getElementById('movementId').value = '';
+      document.getElementById('sortOrder').value = '0';
+      document.getElementById('isActive').checked = true;
+      document.getElementById('formTitle').textContent = 'Add Mobility Movement';
+      saveButton.textContent = 'Save Movement';
+      document.getElementById('cancelButton').hidden = true;
+      formMessage.textContent = '';
+    }
+
+    function editMovement(id) {
+      const movement = movementsById.get(Number(id));
+      if (!movement) return;
+
+      document.getElementById('movementId').value = movement.id;
+      document.getElementById('movementKey').value = movement.movement_key || '';
+      document.getElementById('movementName').value = movement.name || '';
+      document.getElementById('bodyArea').value = movement.body_area || '';
+      document.getElementById('sortOrder').value = movement.sort_order ?? 0;
+      document.getElementById('description').value = movement.description || '';
+      document.getElementById('instructions').value = movement.instructions || '';
+      document.getElementById('safetyNotes').value = movement.safety_notes || '';
+      document.getElementById('isActive').checked = Boolean(movement.is_active);
+
+      document.getElementById('formTitle').textContent = 'Edit Mobility Movement';
+      saveButton.textContent = 'Update Movement';
+      document.getElementById('cancelButton').hidden = false;
+
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+
+      const id = document.getElementById('movementId').value;
+
+      const payload = {
+        movement_key: document.getElementById('movementKey').value.trim(),
+        name: document.getElementById('movementName').value.trim(),
+        body_area: document.getElementById('bodyArea').value.trim(),
+        sort_order: Number(document.getElementById('sortOrder').value),
+        description: document.getElementById('description').value.trim(),
+        instructions: document.getElementById('instructions').value.trim(),
+        safety_notes: document.getElementById('safetyNotes').value.trim(),
+        is_active: document.getElementById('isActive').checked
+      };
+
+      saveButton.disabled = true;
+      formMessage.textContent = 'Saving...';
+
+      try {
+        const response = await fetch(
+          API_BASE + '/workouts/admin/mobility-test/movements' +
+            (id ? '/' + id : ''),
+          {
+            method: id ? 'PUT' : 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify(payload)
+          }
+        );
+
+        const data = await readResponse(response);
+        formMessage.textContent = data.message || 'Movement saved.';
+        resetForm();
+        await loadMovements();
+      } catch (error) {
+        formMessage.textContent = error.message;
+      } finally {
+        saveButton.disabled = false;
+      }
+    });
+
+    async function deactivateMovement(id) {
+      const movement = movementsById.get(Number(id));
+      if (!movement || !movement.is_active) return;
+
+      if (!confirm('Deactivate "' + movement.name + '"?')) return;
+
+      try {
+        const response = await fetch(
+          API_BASE + '/workouts/admin/mobility-test/movements/' + id,
+          {
+            method: 'DELETE',
+            headers: authHeaders()
+          }
+        );
+
+        const data = await readResponse(response);
+        listMessage.textContent = data.message || 'Movement deactivated.';
+        await loadMovements();
+      } catch (error) {
+        listMessage.textContent = error.message;
+      }
+    }
+
+    async function uploadMovementVideo(id) {
+      const input = document.getElementById('video-' + id);
+      const status = document.getElementById('video-status-' + id);
+      const file = input && input.files[0];
+
+      if (!file) {
+        alert('Select a video first.');
+        return;
+      }
+
+      if (file.size > 100 * 1024 * 1024) {
+        alert('Video exceeds the 100 MB upload limit.');
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('video', file);
+
+      status.textContent = 'Uploading video...';
+
+      try {
+        const response = await fetch(
+          API_BASE + '/workouts/admin/mobility-test/movements/' + id + '/video',
+          {
+            method: 'PUT',
+            headers: uploadHeaders(),
+            body: formData
+          }
+        );
+
+        const data = await readResponse(response);
+        listMessage.textContent = data.message || 'Video uploaded.';
+        await loadMovements();
+      } catch (error) {
+        status.textContent = error.message;
+      }
+    }
+
+    async function deleteMovementVideo(id) {
+      if (!confirm('Delete this tutorial video?')) return;
+
+      try {
+        const response = await fetch(
+          API_BASE + '/workouts/admin/mobility-test/movements/' + id + '/video',
+          {
+            method: 'DELETE',
+            headers: authHeaders()
+          }
+        );
+
+        const data = await readResponse(response);
+        listMessage.textContent = data.message || 'Video deleted.';
+        await loadMovements();
+      } catch (error) {
+        listMessage.textContent = error.message;
+      }
+    }
+
+    tableBody.addEventListener('click', async (event) => {
+      const button = event.target.closest('button[data-action]');
+      if (!button) return;
+
+      const id = Number(button.dataset.id);
+
+      if (button.dataset.action === 'edit') editMovement(id);
+      if (button.dataset.action === 'deactivate') await deactivateMovement(id);
+      if (button.dataset.action === 'upload-video') await uploadMovementVideo(id);
+      if (button.dataset.action === 'delete-video') await deleteMovementVideo(id);
+    });
+
+    document.getElementById('cancelButton').addEventListener('click', resetForm);
+
+    loadMovements();
+  </script>
+</body>
+</html>

@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Profile | NutriFit</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <main class="main">
+      <div class="topbar"><h1>My Profile</h1><div id="userChip" class="muted"></div></div>
+      <div class="card">
+        <form id="profileForm">
+          <div class="form-row">
+            <div>
+              <label>Age</label>
+              <input type="number" id="age" min="10" max="120" />
+            </div>
+            <div>
+              <label>Sex</label>
+              <select id="sex">
+                <option value="">Select</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div>
+              <label>Height (cm)</label>
+              <input type="number" id="height_cm" step="0.1" min="50" max="250" />
+            </div>
+            <div>
+              <label>Weight (kg)</label>
+              <input type="number" id="weight_kg" step="0.1" min="20" max="400" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div>
+              <label>Activity factor</label>
+              <select id="activity_factor">
+                <option value="1.2">Sedentary (1.2)</option>
+                <option value="1.375">Light (1.375)</option>
+                <option value="1.55">Moderate (1.55)</option>
+                <option value="1.725">Active (1.725)</option>
+                <option value="1.9">Very active (1.9)</option>
+              </select>
+            </div>
+            <div>
+              <label>Goal type</label>
+              <input id="goal_type" placeholder="e.g. Weight loss, Bulking" />
+            </div>
+          </div>
+          <label>Goal category</label>
+          <input id="goal_category" placeholder="e.g. Body Composition" />
+          <label>Allergens (comma-separated)</label>
+          <input id="allergens" placeholder="peanut, shellfish, dairy" />
+          <button class="btn" type="submit">Save profile</button>
+          <p class="msg" id="msg"></p>
+        </form>
+      </div>
+      <div class="card">
+        <h2>Calculated energy</h2>
+        <p id="tdeeBox" class="muted">Save profile data to compute BMR/TDEE.</p>
+      </div>
+    </main>
+  </div>
+    <script src="api.js"></script>
+  <script src="nav.js"></script>
+  <script>
+    bootShell('profile.html');
+
+    function setAllergens(arr) {
+      document.getElementById('allergens').value = Array.isArray(arr) ? arr.join(', ') : '';
+    }
+    
+    function getAllergens() {
+      return document.getElementById('allergens').value
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+    }
+
+    (async () => {
+      try {
+        const data = await apiGet('/users/profile');
+        // SAFE FALLBACK: Ensure 'p' is always an object, never null
+        const p = data?.profile || data || {}; 
+        
+        document.getElementById('age').value = p.age ?? '';
+        
+        // SAFE toLowerCase: Check if p.sex exists and is a string first
+        document.getElementById('sex').value = (p.sex && typeof p.sex === 'string') 
+          ? p.sex.toLowerCase() 
+          : '';
+          
+        document.getElementById('height_cm').value = p.height_cm ?? '';
+        document.getElementById('weight_kg').value = p.weight_kg ?? '';
+        
+        if (p.activity_factor) {
+          document.getElementById('activity_factor').value = String(p.activity_factor);
+        }
+        
+        document.getElementById('goal_type').value = p.goal_type || '';
+        document.getElementById('goal_category').value = p.goal_category || '';
+        setAllergens(p.allergens);
+        
+      } catch (e) {
+        console.error('Profile load error:', e);
+        document.getElementById('msg').className = 'msg err';
+        document.getElementById('msg').textContent = 'Could not load profile data.';
+      }
+
+      try {
+        const t = await apiGet('/users/tdee');
+        const bmr = Math.round(t?.bmr || 0);
+        const tdee = Math.round(t?.tdee || t?.daily_calories || 0);
+        document.getElementById('tdeeBox').textContent = 
+          `BMR: ${bmr} · TDEE: ${tdee} kcal` + (t?.macros ? ' · P/C/F targets available' : '');
+      } catch (e) {
+        console.error('TDEE load error:', e);
+      }
+    })();
+
+    document.getElementById('profileForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById('msg');
+      msg.className = 'msg';
+      msg.textContent = 'Saving...';
+      
+      try {
+        await apiPut('/users/profile', {
+          age: Number(document.getElementById('age').value) || null,
+          sex: document.getElementById('sex').value || null,
+          height_cm: Number(document.getElementById('height_cm').value) || null,
+          weight_kg: Number(document.getElementById('weight_kg').value) || null,
+          activity_factor: Number(document.getElementById('activity_factor').value) || 1.2,
+          goal_type: document.getElementById('goal_type').value || null,
+          goal_category: document.getElementById('goal_category').value || null,
+          allergens: getAllergens()
+        });
+        
+        msg.className = 'msg ok';
+        msg.textContent = 'Profile saved successfully!';
+        
+        // Refresh TDEE after save
+        const t = await apiGet('/users/tdee');
+        const bmr = Math.round(t?.bmr || 0);
+        const tdee = Math.round(t?.tdee || t?.daily_calories || 0);
+        document.getElementById('tdeeBox').textContent = `BMR: ${bmr} · TDEE: ${tdee} kcal`;
+        
+      } catch (err) {
+        msg.className = 'msg err';
+        msg.textContent = err.message;
+      }
+    };
+  </script>
+</body>
+</html>
